@@ -27,11 +27,17 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 logging.basicConfig(level=logging.INFO)
 
 # ==========================================
-# 🔑 金鑰設定區 (請確認填入)
+# 🔑 金鑰設定區 (已改為讀取環境變數，安全版)
 # ==========================================
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDvnSyAaHEjEumP5CJW1fMmkm7yczfELPg")
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "RNxaa/RsOPgMRCrV6g4BHU+yIkJ/1bRrumy7qKjvzj/BUfzCqCcNkK6VM6tLdW6k6XqIuoDDn4VjgEf8F/4ylv 6QxzSyeQO6UYqCWTJ6+U3jzcHvitJ6Ccj8rhq5727FmjWnBwmMzjHoEPC5O/tSvAdB04t89/1O/w1cDnyilFU=")
-LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "7281d74da94dc5dfd693a4f21052a82e")
+# 這裡不再填寫真實金鑰，而是告訴程式去讀取雲端設定的變數
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
+
+# 檢查是否讀取成功 (除錯用)
+if not GEMINI_API_KEY:
+    print("⚠️ 警告：找不到 GEMINI_API_KEY，請確認 Render 環境變數已設定！")
+
 
 # ==========================================
 # 📂 檔案設定
@@ -224,4 +230,5 @@ def handle_message(event):
 
 if __name__ == "__main__":
     print("🚀 LINE Bot 伺服器已啟動 (Port 5000)")
+
     app.run(port=5000, use_reloader=False)
