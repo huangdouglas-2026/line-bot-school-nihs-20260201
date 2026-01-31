@@ -1,0 +1,39 @@
+name: Daily School Crawler
+
+on:
+  schedule:
+    - cron: '0 22 * * *' # 每天台灣時間早上 6 點執行
+  workflow_dispatch:      # 允許手動按按鈕測試
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas playwright
+          playwright install chromium
+
+      - name: Run Crawlers
+        run: |
+          python ultimate_bot_builder_v40_printHere.py
+          python static_crawler_v43_recursive.py
+          python merge_data.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add nihs_knowledge_full.json
+          git commit -m "Auto-update school data" || exit 0
+          git push
