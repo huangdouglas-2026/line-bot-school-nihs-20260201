@@ -162,7 +162,8 @@ async def extract_content(page, category, title, url):
 async def main():
     print("🚀 V43 (遞迴導航版) 啟動...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False) 
+        # 改成 True，代表在背景執行 (無頭模式)
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
         # 從設定的種子頁面開始
@@ -184,4 +185,5 @@ async def main():
         print("⚠️ 未抓取到資料。")
 
 if __name__ == "__main__":
+
     asyncio.run(main())
