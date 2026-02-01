@@ -239,7 +239,8 @@ async def harvest_tab(page, tab_label):
 async def main():
     print("🚀 V40 (printHere 精確鎖定版) 啟動...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False) 
+        # 改成 True，代表在背景執行 (無頭模式)
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         
         await page.goto(TARGET_URL)
@@ -261,4 +262,5 @@ async def main():
         print("⚠️ 無資料")
 
 if __name__ == "__main__":
+
     asyncio.run(main())
