@@ -66,10 +66,33 @@ jobs:
         python merge_data.py
 
     # ---------------------------------------------------
-    # 步驟 5: 檢查變更並上傳 (Push)
+    # 步驟 5: 檢查變更並上傳 (Push) - 強力除錯版
     # ---------------------------------------------------
     - name: Commit and Push changes
       run: |
-        # 設定機器人身分
+        # 1. 設定機器人身分
         git config --global user.name "GitHub Action Bot"
         git config --global user.email "actions@github.com"
+        
+        # 2. [除錯] 印出目前目錄下的檔案，證明 json 真的存在
+        echo "🔍 [Debug] 列出當前目錄檔案 (檢查 nihs_knowledge_full.json 是否存在)..."
+        ls -lh nihs_knowledge_full.json || echo "❌ 找不到檔案！"
+        
+        # 3. 強制加入檔案
+        git add nihs_knowledge_full.json
+        
+        # 4. [除錯] 印出 Git 狀態，確認是否有東西被 Stage
+        echo "🔍 [Debug] Git Status:"
+        git status
+        
+        # 5. 提交與推送
+        timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        # 嘗試提交，如果沒有變更 (git commit 回傳非 0) 則印出訊息但不報錯
+        if git commit -m "Auto-update data: ${timestamp}"; then
+          echo "✅ 提交成功，準備推送..."
+          git push
+          echo "🚀 推送完成！GitHub 檔案應已更新。"
+        else
+          echo "⚠️ Git 回報沒有變更 (Nothing to commit)，可能是檔案內容完全沒變。"
+        fi
