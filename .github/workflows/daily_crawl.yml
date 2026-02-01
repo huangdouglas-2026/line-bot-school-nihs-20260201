@@ -1,45 +1,75 @@
-name: Daily School Crawler
+name: 每日校園資料更新 (Daily Crawl)
 
+# 設定觸發時機
 on:
+  # 1. 自動排程：每天 UTC 22:00 (台灣時間早上 06:00)
   schedule:
-    - cron: '0 22 * * *' # 每天台灣時間早上 6 點執行
-  workflow_dispatch:      # 允許手動按按鈕測試
+    - cron: '0 22 * * *'
+  
+  # 2. 手動觸發：允許在 GitHub 網頁 Actions 頁面按按鈕執行
+  workflow_dispatch:
 
+# ⚠️ 關鍵權限設定：允許 GitHub Action 修改並上傳檔案
 permissions:
   contents: write
 
 jobs:
-  crawl:
+  update-data:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v3
+    # ---------------------------------------------------
+    # 步驟 1: 下載您的程式碼
+    # ---------------------------------------------------
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    # ---------------------------------------------------
+    # 步驟 2: 設定 Python 環境 (3.10)
+    # ---------------------------------------------------
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-    # 3. 安裝爬蟲需要的套件 (加入 Playwright 安裝指令)
-      - name: Install dependencies
-        run: |
+    # ---------------------------------------------------
+    # 步驟 3: 安裝爬蟲需要的套件 (含 Playwright 修復)
+    # ---------------------------------------------------
+    - name: Install dependencies
+      run: |
         python -m pip install --upgrade pip
-        # 安裝您的程式需要的庫
-        pip install requests beautifulsoup4 pandas lxml playwright
         
-        # ⚠️ 關鍵步驟：安裝 Playwright 瀏覽器核心
+        # 安裝爬蟲與資料處理需要的 Python 庫
+        # (這裡列出了您程式可能用到的所有常見爬蟲套件)
+        pip install requests beautifulsoup4 pandas lxml playwright nest_asyncio google-genai
+        
+        # ⚠️【關鍵修復】安裝 Playwright 的瀏覽器核心 (Chromium)
+        # 沒有這一行，雲端執行會報錯 TargetClosedError
         playwright install chromium
 
-    # 4. 依序執行三個程式
-      - name: Run Crawlers and Merge
-        run: |
-          python ultimate_bot_builder_v40_printHere.py
-          python static_crawler_v43_recursive.py
-          python merge_data.py
+    # ---------------------------------------------------
+    # 步驟 4: 依序執行三個程式
+    # ---------------------------------------------------
+    - name: Run Crawlers and Merge
+      env:
+        # 如果您的爬蟲有用到 API Key，請在 GitHub Secrets 設定，並在這裡引入
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        echo "🕷️ [1/3] 開始執行靜態爬蟲 (Static Crawler)..."
+        python static_crawler_v43_recursive.py
+        
+        echo "🕷️ [2/3] 開始執行動態爬蟲 (Playwright Bot Builder)..."
+        # 注意：Python 程式內必須設定 headless=True 才能在雲端跑
+        python ultimate_bot_builder_v40_printHere.py
+        
+        echo "🔄 [3/3] 開始整合資料 (Merge Data)..."
+        python merge_data.py
 
-      - name: Commit and Push
-        run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add nihs_knowledge_full.json
-          git commit -m "Auto-update school data" || exit 0
-          git push
+    # ---------------------------------------------------
+    # 步驟 5: 檢查變更並上傳 (Push)
+    # ---------------------------------------------------
+    - name: Commit and Push changes
+      run: |
+        # 設定機器人身分
+        git config --global user.name "GitHub Action Bot"
+        git config --global user.email "actions@github.com"
