@@ -89,7 +89,7 @@ class FullContextBrain:
 
         try:
             # ✅ 使用 1.5 Flash (支援長文本)
-            model = genai.GenerativeModel('models/gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.0-flash')
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
@@ -139,3 +139,4 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run(port=5000)
+
