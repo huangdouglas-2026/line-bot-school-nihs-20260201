@@ -187,4 +187,8 @@ def handle_message(event):
 if __name__ == "__main__":
     app.run()
 
+# 這是給 UptimeRobot 檢查用的 "心跳" 路徑
+@app.route("/")
+def home():
+    return "Hello, NIHS Bot is alive!", 200
 
