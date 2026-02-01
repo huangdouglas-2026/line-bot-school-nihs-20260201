@@ -19,12 +19,18 @@ jobs:
         with:
           python-version: '3.9'
 
+    # 3. 安裝爬蟲需要的套件 (加入 Playwright 安裝指令)
       - name: Install dependencies
         run: |
-          pip install pandas playwright
-          playwright install chromium
+        python -m pip install --upgrade pip
+        # 安裝您的程式需要的庫
+        pip install requests beautifulsoup4 pandas lxml playwright
+        
+        # ⚠️ 關鍵步驟：安裝 Playwright 瀏覽器核心
+        playwright install chromium
 
-      - name: Run Crawlers
+    # 4. 依序執行三個程式
+      - name: Run Crawlers and Merge
         run: |
           python ultimate_bot_builder_v40_printHere.py
           python static_crawler_v43_recursive.py
