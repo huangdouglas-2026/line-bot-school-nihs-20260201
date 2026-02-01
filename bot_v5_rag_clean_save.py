@@ -7,7 +7,8 @@ import google.generativeai as genai
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessageContent, TextSendMessage
+# 修改後 (正確)
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 # ==========================================
 # 🔑 金鑰設定 (從環境變數讀取)
@@ -185,3 +186,4 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run()
+
