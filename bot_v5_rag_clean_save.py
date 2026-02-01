@@ -123,7 +123,7 @@ class CloudSchoolBrain:
         
         【問題】：{query}
         """
-        model = genai.GenerativeModel('gemini-1.5-pro') 
+        model = genai.GenerativeModel('Gemini 2.0 Flash-Lite') 
         response = model.generate_content(prompt)
         return response.text
 
@@ -180,3 +180,4 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run(port=5000)
+
