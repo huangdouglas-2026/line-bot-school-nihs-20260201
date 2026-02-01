@@ -1,8 +1,5 @@
 import os
 import json
-import numpy as np
-import faiss
-import pickle
 import google.generativeai as genai
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
@@ -10,142 +7,109 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 # ==========================================
-# 🔑 金鑰設定 (從環境變數讀取)
+# 🔑 設定區
 # ==========================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 
-# 初始化 Google Gemini
+# 初始化
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# 初始化 LINE Bot
 if LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET:
     line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
     handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = Flask(__name__)
-
-# 檔案路徑設定 (必須與您上傳的檔名一致)
-RAW_DATA_FILE = 'nihs_knowledge_full.json'
-INDEX_FILE = 'nihs_faiss.index'  # 向量索引檔
-PKL_FILE = 'nihs_chunks.pkl'     # 文字內容檔
+DATA_FILE = 'nihs_knowledge_full.json'
 
 # ==========================================
-# 🧠 AI 大腦核心 (讀取檔案優先版)
+# 🧠 AI 大腦 (Long Context 全知模式)
 # ==========================================
-class CloudSchoolBrain:
+class FullContextBrain:
     def __init__(self, json_path):
-        self.ready = False
-        self.index = None
-        self.chunks = []
-        self.json_path = json_path
+        self.knowledge_text = ""
+        self.load_data(json_path)
+
+    def load_data(self, path):
+        """ 直接讀取 JSON，組合成超長文本 """
+        if not os.path.exists(path):
+            print(f"❌ 找不到 {path}")
+            self.knowledge_text = "目前系統資料庫遺失，無法回答問題。"
+            return
         
-        # 🟢 關鍵邏輯：優先讀取現成的索引檔
-        if os.path.exists(INDEX_FILE) and os.path.exists(PKL_FILE):
-            print("📂 [系統] 發現雲端大腦檔案，正在載入...")
-            self.load_brain()
-        else:
-            print("🐢 [系統] 警告：找不到索引檔，將嘗試 API 重建 (可能導致記憶體不足)...")
-            self.build_brain()
-
-    def load_brain(self):
-        """ 從硬碟讀取大腦 (快速啟動) """
         try:
-            self.index = faiss.read_index(INDEX_FILE)
-            with open(PKL_FILE, "rb") as f:
-                self.chunks = pickle.load(f)
-            self.ready = True
-            print(f"✅ [系統] 大腦載入成功！索引大小: {self.index.ntotal}")
-        except Exception as e:
-            print(f"❌ 讀取存檔失敗: {e}")
-
-    def get_embedding(self, text):
-        try:
-            # 使用最新 text-embedding-004
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_query"
-            )
-            return result['embedding']
-        except Exception as e:
-            print(f"❌ Embedding Error: {e}")
-            return [0] * 768
-
-    def build_brain(self):
-        """ 備用方案：現場建立索引 (盡量避免在雲端執行此段) """
-        try:
-            if not os.path.exists(self.json_path):
-                return
-            with open(self.json_path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-
-            self.chunks = []
-            vectors = []
+            
+            # 統計一下載入了什麼
+            print(f"📂 [系統] 正在載入 {len(data)} 筆資料...")
+            
+            # 將資料組合成適合閱讀的文本
+            text_parts = []
             for item in data:
-                text_content = f"標題：{item.get('title', '')}\n內文：{item.get('content', '')}"
-                self.chunks.append(text_content)
-                vec = self.get_embedding(text_content)
-                vectors.append(vec)
-
-            embedding_matrix = np.array(vectors).astype('float32')
-            dimension = 768 
-            self.index = faiss.IndexFlatL2(dimension)
-            self.index.add(embedding_matrix)
-            self.ready = True
-            print(f"✅ [雲端大腦] 重建完成！")
+                # 容錯處理：有些欄位可能是 None
+                title = item.get('title', '無標題')
+                content = item.get('content', '無內容')
+                date = item.get('date', '')
+                
+                part = f"【日期】：{date}\n【標題】：{title}\n【內容】：{content}\n----------------"
+                text_parts.append(part)
+            
+            self.knowledge_text = "\n".join(text_parts)
+            print(f"✅ [系統] 資料載入完成！總字數: {len(self.knowledge_text)}")
+            
         except Exception as e:
-            print(f"❌ 重建失敗: {e}")
+            print(f"❌ 讀取資料失敗: {e}")
+            self.knowledge_text = "資料讀取發生錯誤。"
 
-    def search(self, query, top_k=3):
-        if not self.ready:
-            return []
-        query_vec = self.get_embedding(query)
-        query_vec_np = np.array([query_vec]).astype('float32')
-        distances, indices = self.index.search(query_vec_np, top_k)
-        results = []
-        for i in range(top_k):
-            idx = indices[0][i]
-            if idx != -1 and idx < len(self.chunks):
-                results.append(self.chunks[idx])
-        return results
+    def ask(self, user_query):
+        """ 把整份資料丟給 Gemini 1.5 Flash """
+        if not self.knowledge_text:
+            return "系統資料庫讀取失敗。"
 
-    def ask_gemini(self, query, context_list):
-        context_text = "\n\n".join(context_list)
+        # Prompt 設計
         prompt = f"""
-        你是內湖高工的親切校園助手。請根據參考資料回答問題。
-        若資料不足，請禮貌告知查無資訊。
+        你是內湖高工的校園親切助手。
+        請閱讀下方的【校園知識庫】，並根據內容回答使用者的問題。
         
-        【參考資料】：
-        {context_text}
-        
-        【問題】：{query}
+        【回答規則】：
+        1. **一定要從資料庫裡找答案**。
+        2. 如果資料庫裡有「地址」、「校長」等資訊，請直接回答。
+        3. 如果資料庫裡真的完全沒有提到，才說「查無資料」。
+        4. 語氣要親切、有禮貌。
+
+        【校園知識庫開始】
+        {self.knowledge_text}
+        【校園知識庫結束】
+
+        使用者問題：{user_query}
         """
-        model = genai.GenerativeModel('gemini-2.0-flash') 
-        response = model.generate_content(prompt)
-        return response.text
 
-# ==========================================
-# 🚀 啟動機制
-# ==========================================
+        try:
+            # ✅ 使用 1.5 Flash (支援長文本)
+            model = genai.GenerativeModel('models/gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            print(f"❌ API Error: {e}")
+            return "AI 連線忙碌中，請稍後再試。"
+
+# 賴皮啟動 (Lazy Loading)
 brain = None
-
 def get_brain():
     global brain
     if brain is None:
-        print("🐢 [系統] 啟動大腦引擎中...")
-        brain = CloudSchoolBrain(RAW_DATA_FILE)
+        brain = FullContextBrain(DATA_FILE)
     return brain
 
 # ==========================================
-# 🌐 Flask 路由
+# 🌐 路由區
 # ==========================================
 @app.route("/", methods=['GET'])
 def home():
-    # 這是給 UptimeRobot 的心跳回應
-    return "Hello, NIHS Bot is alive! (Brain Loaded)", 200
+    return "Hello, NIHS Bot (Full Context Version) is alive!", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -159,26 +123,19 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_msg = event.message.text.strip()
-    print(f"👉 [Debug] 收到訊息: {user_msg}")
-    
+    msg = event.message.text.strip()
+    print(f"👉 收到: {msg}")
+
     try:
         current_brain = get_brain()
+        reply_text = current_brain.ask(msg)
         
-        if not current_brain or not current_brain.ready:
-            reply_text = "系統正在啟動中，請稍後再試..."
-        else:
-            relevant_docs = current_brain.search(user_msg, top_k=3)
-            reply_text = current_brain.ask_gemini(user_msg, relevant_docs)
-
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=reply_text)
         )
     except Exception as e:
-        print(f"❌ [Error] {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     app.run(port=5000)
-
-
