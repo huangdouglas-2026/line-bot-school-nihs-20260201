@@ -29,7 +29,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ==========================================
-# 🧠 SQLite 大腦 (校長資訊 & 行事曆連結修正版)
+# 🧠 SQLite 大腦 (智慧關鍵字拆解版)
 # ==========================================
 class SQLiteBrain:
     def __init__(self):
@@ -78,25 +78,30 @@ class SQLiteBrain:
                                               (f"聯絡電話 {c.get('title')}", f"電話:{c.get('phone')}", "電話", "置頂", "學校總機", "無", "無"))
                             count += 10
 
-                        # 2. 行事曆 (每日活動) - 來自 nihs_calendar.json
+                        # 2. 行事曆 (nihs_calendar.json)
                         elif isinstance(data, list) and filename == 'nihs_calendar.json':
                             for item in data:
                                 if 'event' in item:
-                                    # 這裡 category 設為 '行事曆' 以便 get_calendar 查詢
                                     self.cursor.execute("INSERT INTO knowledge (title, content, category, date, unit, url, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                                       (f"行事曆: {item.get('event')}", item.get('event'), "行事曆", item.get('date'), item.get('category', '教務處'), "無", "無"))
                                     count += 1
 
-                        # 3. 完整公告資料 (包含校長資訊、行事曆PDF連結) - 來自 nihs_knowledge_full.json
+                        # 3. 完整公告 (nihs_knowledge_full.json) - 重點在這裡
                         elif isinstance(data, list) and filename == 'nihs_knowledge_full.json':
                             for item in data:
                                 title = item.get('title', '')
-                                content = str(item.get('content', ''))
                                 
-                                # 🔥 修正點：優先使用 JSON 裡的 category，若無才預設為 '公告'
-                                # 這樣才能正確讀入 "校園靜態資訊"
+                                # 🔥 確保內容被轉成純文字，增加搜尋命中率
+                                content_raw = item.get('content', '')
+                                if isinstance(content_raw, list):
+                                    content = " ".join([str(x) for x in content_raw])
+                                else:
+                                    content = str(content_raw)
+                                
+                                # 移除多餘的空白，讓 "校　長" 變成 "校長" (雖然原始資料保留，但可增加一欄 clean_content 做搜尋優化，這裡先簡單處理)
+                                # content = content.replace("　", "") 
+                                
                                 category = item.get('category', '公告')
-                                
                                 unit = item.get('unit', '校務行政')
                                 date = item.get('date', '')
                                 url = item.get('url', 'https://www.nihs.tp.edu.tw')
@@ -133,14 +138,13 @@ class SQLiteBrain:
             return msg
         return None
 
-    # 👉 行事曆查詢 (AI 分類 + 動態抓取真實 URL)
+    # 👉 行事曆查詢
     def get_calendar(self, user_query):
         try:
             now = datetime.now()
             target_year = now.year
             target_month = now.month
 
-            # 1. 解析月份
             match = re.search(r'(\d+|[一二三四五六七八九十]+)月', user_query)
             if match:
                 raw_month = match.group(1)
@@ -155,7 +159,6 @@ class SQLiteBrain:
                     target_month = 1
                     target_year += 1
 
-            # 2. 抓取當月所有活動 (來自 nihs_calendar.json 的資料)
             query_date_str = f"{target_year}/{target_month:02d}%"
             sql = "SELECT date, unit, title, url, content FROM knowledge WHERE category='行事曆' AND date LIKE ? ORDER BY date ASC"
             self.cursor.execute(sql, (query_date_str,))
@@ -163,43 +166,73 @@ class SQLiteBrain:
 
             if not rows: return None, target_month, ""
 
-            # 3. 🔥 關鍵修正：去資料庫抓「114學年度第2學期行事曆」的真實 URL
-            # 我們嘗試搜尋標題含有 "114" 和 "行事曆" 的公告
-            calendar_source_url = "https://www.nihs.tp.edu.tw/nss/p/calendar" # 預設備用
+            # 嘗試抓取真實行事曆連結
+            calendar_source_url = "https://www.nihs.tp.edu.tw/nss/p/calendar"
             try:
                 self.cursor.execute("SELECT url FROM knowledge WHERE title LIKE '%114%行事曆%' AND (category='公告' OR category='校園靜態資訊') LIMIT 1")
                 url_row = self.cursor.fetchone()
                 if url_row and url_row[0] != '無':
                     calendar_source_url = url_row[0]
-            except:
-                pass # 若找不到就用預設
+            except: pass
 
-            # 4. 組合資料
             formatted_data = ""
             for r in rows:
-                formatted_data += f"""
-日期：{r[0]}
-活動：{r[4]}
-單位：{r[1]}
----
-"""
+                formatted_data += f"\n日期：{r[0]}\n活動：{r[4]}\n單位：{r[1]}\n---\n"
             return formatted_data, target_month, calendar_source_url
 
         except Exception as e:
-            print(f"❌ 行事曆查詢錯誤: {e}")
             return None, 0, ""
 
-    # 👉 一般搜尋
-    def search_db(self, query, top_n=5):
+    # 👉 🔥 核心修正：智慧多重搜尋 (Smart Search)
+    def search_db(self, query, top_n=10): # 增加 top_n 讓 Gemini 讀多一點資料
         try:
-            keywords = [k for k in query.split() if len(k) > 1]
-            if not keywords: keywords = [query]
-            keyword = keywords[0]
+            # 1. 關鍵字拆解：將 "校長姓名" 拆為 ["校長", "姓名"]
+            # 簡單邏輯：如果是長句，每兩個字切一刀；或直接取關鍵名詞
+            # 這裡使用簡單的「單字 + 雙字」拆解策略
             
-            # 搜尋標題或內容
-            sql = f"SELECT date, unit, title, url, attachments, content FROM knowledge WHERE title LIKE ? OR content LIKE ? ORDER BY date DESC LIMIT {top_n}"
-            self.cursor.execute(sql, (f'%{keyword}%', f'%{keyword}%'))
+            keywords = []
+            
+            # 如果使用者輸入很短 (如 "校長")，直接搜
+            if len(query) <= 2:
+                keywords.append(query)
+            else:
+                # 簡單分詞：取前兩個字 (如 "校長")，取後兩個字 (如 "泡麵")
+                # 這能有效解決 "校長姓名" 這種複合詞
+                keywords.append(query) # 原句
+                keywords.append(query[:2]) # 前兩字
+                if len(query) > 2:
+                    keywords.append(query[-2:]) # 後兩字
+
+            # 去除重複並過濾過短的
+            keywords = list(set([k for k in keywords if len(k) >= 2]))
+            
+            if not keywords: keywords = [query]
+
+            print(f"🔍 搜尋關鍵字: {keywords}") # Debug 用
+
+            # 2. 動態 SQL 生成：使用 OR 邏輯
+            # WHERE (title LIKE %k1% OR content LIKE %k1%) OR (title LIKE %k2% OR content LIKE %k2%)
+            
+            conditions = []
+            params = []
+            for k in keywords:
+                conditions.append("(title LIKE ? OR content LIKE ?)")
+                params.extend([f'%{k}%', f'%{k}%'])
+            
+            where_clause = " OR ".join(conditions)
+            
+            sql = f"""
+                SELECT date, unit, title, url, attachments, content 
+                FROM knowledge 
+                WHERE {where_clause} 
+                ORDER BY date DESC 
+                LIMIT {top_n}
+            """
+            
+            self.cursor.execute(sql, tuple(params))
             rows = self.cursor.fetchall()
+
+            if not rows: return ""
 
             formatted_results = ""
             for i, r in enumerate(rows):
@@ -210,7 +243,7 @@ class SQLiteBrain:
 標題：{r[2]}
 網址：{r[3]}
 附件：{r[4]}
-內容摘要：{r[5][:300]}... 
+內容摘要：{r[5][:500]}... 
 --------------------------------
 """
             return formatted_results
@@ -220,50 +253,40 @@ class SQLiteBrain:
             return ""
 
     def ask(self, user_query):
-        # 1. 直通車
         direct = self.check_rules(user_query)
         if direct: return direct
 
-        # 2. 行事曆查詢
+        # 行事曆
         if "行事曆" in user_query:
             cal_data, month, source_url = self.get_calendar(user_query)
-            
             if cal_data:
                 retrieved_data = cal_data
                 system_instruction = f"""
 你現在是內湖高工的行事曆秘書。使用者想查詢 {month} 月份的行事曆。
-我會提供該月份的「所有原始活動資料」，請你發揮判斷力，將這些活動區分為兩個區塊呈現：
-
-【區塊一：🏠 家長與學生重要日程】
-* 判斷標準：考試 (段考、模擬考)、放假 (補假、寒暑假)、註冊、繳費、全校性典禮、社團活動、競賽、升學相關。
-* 請依日期排序。
-
-【區塊二：🏫 學校行政與教師事務】
-* 判斷標準：各類會議、設備檢查、作業抽查、教師研習。
-* 若該區塊無活動，請標註「無」。
-
-【結尾要求】：
-* 請在回覆的**最末端**，獨立一行列出原始參考資料來源。
-* 格式： 🌐 資料來源：[114學年度第2學期行事曆]({source_url})
+請根據原始資料，區分【🏠 家長與學生重要日程】與【🏫 學校行政與教師事務】。
+請在回覆最末端列出：🌐 資料來源：[114學年度第2學期行事曆]({source_url})
 """
-                user_query = f"請幫我整理 {month} 月份的行事曆，請依照上述規則分類。\n\n【原始資料】：\n{cal_data}"
+                user_query = f"請幫我整理 {month} 月份的行事曆。\n\n【原始資料】：\n{cal_data}"
             else:
                 return f"🔍 查詢不到 {datetime.now().year}年 相關月份的行事曆資訊。"
 
-        # 3. 一般搜尋 (校長資訊會在這裡被搜到)
+        # 一般搜尋 (校長、合作社)
         else:
-            retrieved_data = self.search_db(user_query, top_n=5)
-            # 讓 Prompt 更聰明：如果有提到校長，要整理出名字和職掌
+            retrieved_data = self.search_db(user_query, top_n=8) # 抓多一點給 AI 判斷
+            
+            # 🔥 Prompt 優化：讓 Gemini 知道它的任務是「閱讀理解」
             system_instruction = """
-你是一個親切的內湖高工校園小幫手。請根據檢索資料回答問題。
-1. 務必附上網址與附件連結。
-2. 若查詢「校長」資訊，請從資料中提取校長姓名、聯絡分機與業務職掌。
-3. 若資料中沒有答案，請誠實告知。
+你是一個聰明的內湖高工校園小幫手。
+使用者的問題可能無法直接從關鍵字找到答案，你需要「閱讀」下方的檢索資料來推理。
+
+【特殊任務】：
+1. **校長資訊**：若檢索資料中有提到「校長室」、「業務職掌」或「林俊岳」，請整理出校長姓名與聯絡方式。
+2. **合作社/泡麵**：若檢索資料中有提到「員生社」、「販賣」、「食品」或「熱食部」，請查看內容是否有提到相關商品。若資料中完全沒提到販賣項目，請回答「資料庫中尚無合作社詳細販售清單」。
+3. **網址**：請務必附上該筆資料的網址。
 """
             if not retrieved_data:
-                return "您的問題很好！目前公告中暫時找不到相關資訊。建議您聯繫學校 (02-26574874)，我們會記錄並更新。"
+                return "您的問題很好！目前公告資料庫中暫時找不到相關資訊。建議您聯繫學校 (02-26574874)，我們會記錄並更新。"
 
-        # 4. 呼叫 Gemini
         now = datetime.now()
         prompt = f"""
 {system_instruction}
@@ -283,38 +306,26 @@ class SQLiteBrain:
 
 brain = SQLiteBrain()
 
-# ... (Debug 頁面與路由保持不變) ...
-
+# ... (Debug 頁面與路由維持不變) ...
 @app.route("/debug", methods=['GET'])
 def debug_page():
     try:
         brain.cursor.execute("SELECT category, COUNT(*) FROM knowledge GROUP BY category")
         stats = brain.cursor.fetchall()
-        
-        # 特別檢查校長資料
-        brain.cursor.execute("SELECT id, title, content FROM knowledge WHERE content LIKE '%林俊岳%'")
+        brain.cursor.execute("SELECT id, title, content FROM knowledge WHERE content LIKE '%校長%' LIMIT 5")
         principal_rows = brain.cursor.fetchall()
-
-        # 檢查行事曆連結
-        brain.cursor.execute("SELECT title, url FROM knowledge WHERE title LIKE '%行事曆%' AND category!='行事曆' LIMIT 5")
-        cal_url_rows = brain.cursor.fetchall()
-
+        
         html = "<h1>🕵️‍♂️ 資料庫診斷</h1>"
         html += "<h3>📊 分類統計</h3><ul>"
         for s in stats: html += f"<li>{s[0]}: {s[1]} 筆</li>"
         html += "</ul>"
-
-        html += "<h3>👨‍🏫 校長資料檢查 (林俊岳)</h3>"
-        for r in principal_rows: html += f"<p>ID:{r[0]} | {r[1]} | {r[2][:50]}...</p>"
-
-        html += "<h3>🔗 行事曆來源連結檢查</h3>"
-        for r in cal_url_rows: html += f"<p>{r[0]} -> <a href='{r[1]}'>{r[1]}</a></p>"
-        
+        html += "<h3>👨‍🏫 校長資料檢查</h3>"
+        for r in principal_rows: html += f"<p>ID:{r[0]} | {r[1]}...</p>"
         return html
     except Exception as e: return str(e)
 
 @app.route("/", methods=['GET'])
-def index(): return "Bot Live (Principal & URL Fix)", 200
+def index(): return "Bot Live (Smart Search)", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
