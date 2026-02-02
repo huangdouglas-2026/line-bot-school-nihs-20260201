@@ -1,4 +1,5 @@
 import os
+import re # 🆕 新增 re 模組處理正規表達式
 import json
 import sqlite3
 import google.generativeai as genai
@@ -29,7 +30,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ==========================================
-# 🧠 SQLite 大腦 (完整欄位 + 家長濾鏡版)
+# 🧠 SQLite 大腦 (月份行事曆增強版)
 # ==========================================
 class SQLiteBrain:
     def __init__(self):
@@ -41,7 +42,6 @@ class SQLiteBrain:
         self.load_data()
 
     def init_db(self):
-        # ⚡ 擴充欄位：增加 unit, url, attachments
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS knowledge (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +67,7 @@ class SQLiteBrain:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         
-                        # 1. FAQ (交通/電話)
+                        # 1. FAQ
                         if filename == 'nihs_faq.json':
                             self.faq_data = data
                             # 交通
@@ -85,12 +85,11 @@ class SQLiteBrain:
                         elif isinstance(data, list) and filename == 'nihs_calendar.json':
                             for item in data:
                                 if 'event' in item:
-                                    # 行事曆通常沒有 URL，設為無
                                     self.cursor.execute("INSERT INTO knowledge (title, content, category, date, unit, url, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                                       (f"行事曆: {item.get('event')}", item.get('event'), "行事曆", item.get('date'), item.get('category', '教務處'), "無", "無"))
                                     count += 1
 
-                        # 3. 公告 (nihs_knowledge_full.json)
+                        # 3. 公告
                         elif isinstance(data, list) and filename == 'nihs_knowledge_full.json':
                             for item in data:
                                 title = item.get('title', '')
@@ -99,11 +98,9 @@ class SQLiteBrain:
                                 date = item.get('date', '')
                                 url = item.get('url', '無')
                                 
-                                # 處理附件 (將 List 轉為字串)
                                 atts = item.get('attachments', [])
                                 att_str = ""
                                 if atts:
-                                    # 簡單串接附件網址
                                     att_list = [f"{a.get('title', '附件')}: {a.get('url')}" for a in atts]
                                     att_str = "\n".join(att_list)
                                 else:
@@ -122,7 +119,6 @@ class SQLiteBrain:
     # 👉 規則直通車
     def check_rules(self, query):
         q = query.lower()
-        # 交通
         if any(k in q for k in ['交通', '地址', '在哪', '捷運', '公車', '怎麼去']):
             t = self.faq_data.get('traffic', {})
             return (
@@ -132,69 +128,86 @@ class SQLiteBrain:
                 f"🚌 **公車**：\n{t.get('bus', '無資料')}\n\n"
                 "🌐 學校首頁：https://www.nihs.tp.edu.tw"
             )
-        # 電話
         if any(k in q for k in ['電話', '分機', '聯絡', '總機']):
             msg = "📞 **內湖高工常用電話**\n"
             for c in self.faq_data.get('contacts', []):
                 msg += f"\n🔸 {c.get('title')}: {c.get('phone')}"
             return msg
-        # 校長
-        if '校長' in q:
-            return (
-                "👨‍🏫 **校長室資訊**\n"
-                "聯絡電話：分機 301\n\n"
-                "(備註：若您是詢問現任校長姓名，目前公告資料庫中暫無顯示。)\n"
-                "相關公告請參考：https://www.nihs.tp.edu.tw"
-            )
         return None
 
-    # 👉 行事曆專用查詢 (家長濾鏡版)
-    def get_calendar(self):
+    # 👉 行事曆專用查詢 (月份鎖定 + 家長濾鏡 + 完整格式)
+    def get_calendar(self, user_query):
         try:
-            today = datetime.now().strftime("%Y/%m/%d")
-            # 抓取今天之後的活動
-            self.cursor.execute("SELECT date, content FROM knowledge WHERE category='行事曆' AND date >= ? ORDER BY date ASC LIMIT 15", (today,))
+            now = datetime.now()
+            target_year = now.year
+            target_month = now.month # 預設為當月
+
+            # 1. 嘗試解析「X月」
+            # 支援數字 (3月) 或中文 (三月)
+            match = re.search(r'(\d+|[一二三四五六七八九十]+)月', user_query)
+            if match:
+                raw_month = match.group(1)
+                cn_map = {'一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10, '十一':11, '十二':12}
+                
+                if raw_month.isdigit():
+                    target_month = int(raw_month)
+                elif raw_month in cn_map:
+                    target_month = cn_map[raw_month]
+
+            # 2. 組合查詢條件 (YYYY/MM)
+            # 使用 SQL LIKE '2026/02%' 來抓取該月所有活動
+            query_date_str = f"{target_year}/{target_month:02d}%"
+            
+            # 查詢：只抓行事曆類別，且符合該月份
+            sql = "SELECT date, unit, title, url, attachments, content FROM knowledge WHERE category='行事曆' AND date LIKE ? ORDER BY date ASC"
+            self.cursor.execute(sql, (query_date_str,))
             rows = self.cursor.fetchall()
+
             if not rows: return None
-            
-            # ⚡ 家長濾鏡：剔除「會議」、「檢查」、「研習」、「作業」
-            # 保留：考試、放假、典禮、說明會、報名、榜單
-            filtered_events = []
-            block_keywords = ['會議', '檢查', '研習', '作業檢查', '繳交', '日誌']
-            
+
+            # 3. 家長濾鏡 + 格式化輸出
+            formatted_results = ""
+            count = 0
+            block_keywords = ['會議', '檢查', '研習', '作業檢查', '繳交', '日誌', '週記', '填報']
+
             for r in rows:
-                event_name = r[1]
-                # 如果包含封鎖關鍵字，就跳過
+                event_name = r[5] # content 就是活動名稱
+                # 濾掉行政瑣事
                 if any(bk in event_name for bk in block_keywords):
                     continue
-                filtered_events.append(f"{r[0]} {event_name}")
-                if len(filtered_events) >= 6: # 只取前 6 個重點
-                    break
-            
-            if not filtered_events: return None
+                
+                count += 1
+                formatted_results += f"""
+【資料來源 {count}】
+日期：{r[0]}
+單位：{r[1]}
+標題：{r[2]}
+網址：{r[3]}
+附件：{r[4]}
+內容摘要：{r[5]}
+--------------------------------
+"""
+            if count == 0:
+                return None # 該月有活動，但全被濾掉了
 
-            msg = "📅 **近期重要行事曆 (家長重點版)**\n"
-            for e in filtered_events:
-                msg += f"\n🔹 {e}"
-            return msg
-        except: return None
+            return formatted_results
+        except Exception as e:
+            print(f"❌ 行事曆查詢錯誤: {e}")
+            return None
 
-    # 👉 SQL 模糊檢索 (回傳完整格式)
+    # 👉 SQL 模糊檢索
     def search_db(self, query, top_n=5):
         try:
             keywords = [k for k in query.split() if len(k) > 1]
             if not keywords: keywords = [query]
             keyword = keywords[0]
             
-            # ⚡ 選取所有欄位
             sql = f"SELECT date, unit, title, url, attachments, content FROM knowledge WHERE title LIKE ? OR content LIKE ? ORDER BY date DESC LIMIT {top_n}"
             self.cursor.execute(sql, (f'%{keyword}%', f'%{keyword}%'))
             rows = self.cursor.fetchall()
 
             formatted_results = ""
             for i, r in enumerate(rows):
-                # r[0]=date, r[1]=unit, r[2]=title, r[3]=url, r[4]=attachments, r[5]=content
-                # 嚴格遵照用戶指定格式
                 formatted_results += f"""
 【資料來源 {i+1}】
 日期：{r[0]}
@@ -212,23 +225,31 @@ class SQLiteBrain:
             return ""
 
     def ask(self, user_query):
-        # 1. 直通車
+        # 1. 直通車 (交通/電話)
         direct = self.check_rules(user_query)
         if direct: return direct
 
-        # 2. 行事曆直通車
+        # 2. 行事曆直通車 (傳入 user_query 以解析月份)
         if "行事曆" in user_query:
-            cal = self.get_calendar()
-            if cal: return cal
-
-        # 3. 資料庫搜尋
-        retrieved_data = self.search_db(user_query, top_n=5)
+            cal_data = self.get_calendar(user_query)
+            # 如果抓得到資料，就直接作為「檢索資料」丟給 Gemini 整理
+            # 這樣 Gemini 可以加上親切的開頭語
+            if cal_data:
+                retrieved_data = cal_data
+                # 強制 Gemini 知道這是行事曆回答
+                user_query += " (請列出上述行事曆內容)" 
+            else:
+                # 如果該月沒資料，或全被過濾
+                return f"🔍 查詢不到該月份 ({datetime.now().year}年) 的重要行事曆資訊，或者該月份沒有需家長特別留意的活動。"
+        else:
+            # 3. 一般資料庫搜尋
+            retrieved_data = self.search_db(user_query, top_n=5)
         
         # 4. 判斷是否有資料
         if not retrieved_data:
             return "您的問題很好！目前公告中暫時找不到相關資訊。建議您聯繫學校 (02-26574874)，我們會記錄並更新。"
 
-        # 5. Gemini 生成 (使用用戶指定 Prompt)
+        # 5. Gemini 生成
         now = datetime.now()
         
         prompt = f"""
@@ -238,12 +259,8 @@ class SQLiteBrain:
 【回答準則】：
 1. 語氣要親切、有禮貌（繁體中文）。
 2. **務必附上「網址」**：如果資料中有連結，請直接提供給家長點擊。
-3. **提及附件**：如果資料有附件（如 PDF、Word），請提醒家長可以點擊連結下載。
-4. 如果資料中沒有答案，請誠實說「目前公告中找不到相關資訊」，建議家長直接聯繫學校。
-5. 若問到行事曆或日期，請精確回答。
-
-另外，當有提問【學校行事曆】則列出當月份的日期，活動內容。
-活動內容，家長不需要知道「課務會議」或「設備檢查」何時舉行，他們只需要知道：什麼時候考試？什麼時候放假？什麼時候該出現？
+3. **提及附件**：如果資料有附件，請提醒家長可以點擊下載。
+4. 若是回答行事曆，請依照檢索資料的時間順序排列，並清楚列出日期與活動名稱。
 
 【檢索資料】：
 {retrieved_data}
@@ -260,7 +277,7 @@ class SQLiteBrain:
 brain = SQLiteBrain()
 
 @app.route("/", methods=['GET'])
-def index(): return "Bot Live (Format Fixed)", 200
+def index(): return "Bot Live (Calendar Month Fixed)", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
