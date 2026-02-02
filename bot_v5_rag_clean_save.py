@@ -1,5 +1,5 @@
 import os
-# ⚡ 鎖定單執行緒，這在 Render 的受限環境中能提供最高穩定性
+# ⚡ 鎖定單執行緒
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
@@ -16,7 +16,7 @@ from datetime import datetime
 # 🔑 設定區
 # ==========================================
 MODEL_NAME = 'gemini-2.0-flash'
-EMBED_MODEL = 'models/text-embedding-004' # Google 雲端向量模型
+EMBED_MODEL = 'models/text-embedding-004'
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
@@ -31,140 +31,158 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 app = Flask(__name__)
 
 # ==========================================
-# 🧠 輕量化大腦 (API 向量檢索版)
+# 🧠 雙層向量大腦 (Split-Index Brain)
 # ==========================================
-class LightVectorBrain:
+class DualVectorBrain:
     def __init__(self):
         self.ready = False
-        self.source_data = []
-        self.vectors = None
+        # 建立兩個獨立的資料庫
+        self.core_data = []      # 存放 FAQ、行事曆 (高權重)
+        self.core_vectors = None
+        
+        self.news_data = []      # 存放公告 (低權重)
+        self.news_vectors = None
+        
         self.load_and_vectorize()
 
-    def load_and_vectorize(self):
-        """ 讀取資料並『分批』透過 API 取得向量 """
-        files = ['nihs_knowledge_full.json', 'nihs_faq.json', 'nihs_calendar.json']
-        all_items = []
+    def embed_batch(self, text_list):
+        """ 批次向量化工具 """
+        if not text_list: return None
+        batch_size = 50
+        all_vecs = []
+        print(f"📡 正在處理 {len(text_list)} 筆資料...")
         
+        for i in range(0, len(text_list), batch_size):
+            batch = text_list[i : i + batch_size]
+            try:
+                res = genai.embed_content(model=EMBED_MODEL, content=batch, task_type="retrieval_document")
+                all_vecs.extend(res['embedding'])
+            except Exception as e:
+                print(f"⚠️ Batch error: {e}")
+                # 補空向量防崩潰
+                all_vecs.extend([[0]*768] * len(batch))
+                
+        return np.array(all_vecs).astype('float32')
+
+    def load_and_vectorize(self):
+        files = ['nihs_knowledge_full.json', 'nihs_faq.json', 'nihs_calendar.json']
+        
+        core_items = [] # 核心區
+        news_items = [] # 公告區
+
         try:
             for file in files:
                 if os.path.exists(file):
                     with open(file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         
-                        # ⚡ 針對 FAQ 進行「關鍵字加強」，確保不會被公告淹沒
+                        # 1. 處理 FAQ (放入核心區)
                         if file == 'nihs_faq.json':
-                            # 處理交通：加上「怎麼去、公車、捷運」等強關鍵字
                             traffic = data.get('traffic', {})
-                            traffic_str = (
-                                f"【學校交通資訊】(關鍵字: 怎麼去學校, 地址, 位置, 捷運, 公車)\n"
-                                f"地址: {traffic.get('address', '無')}\n"
-                                f"捷運: {traffic.get('mrt', '無')}\n"
-                                f"公車: {traffic.get('bus', '無')}"
+                            # 強力關鍵字植入
+                            core_items.append(
+                                f"【學校交通資訊】(關鍵字: 怎麼去, 地址, 捷運, 公車)\n"
+                                f"地址: {traffic.get('address')}\n"
+                                f"捷運: {traffic.get('mrt')}\n"
+                                f"公車: {traffic.get('bus')}"
                             )
-                            all_items.append(traffic_str)
-                            
-                            # 處理電話：加上「電話、分機、聯絡」等強關鍵字
                             for c in data.get('contacts', []):
-                                contact_str = f"【學校聯絡電話】處室:{c.get('title')} 電話:{c.get('phone')} (關鍵字: 分機, 找老師)"
-                                all_items.append(contact_str)
-
-                        elif isinstance(data, list):
+                                core_items.append(f"【聯絡電話】{c.get('title')} 電話:{c.get('phone')} (關鍵字: 分機, 找老師)")
+                        
+                        # 2. 處理行事曆 (放入核心區)
+                        elif file == 'nihs_calendar.json':
                             for item in data:
-                                if 'event' in item: # 行事曆
-                                    all_items.append(f"【行事曆】日期:{item.get('date')} 活動:{item.get('event')}")
-                                else: # 公告
-                                    unit = item.get('unit', '')
-                                    # 限制公告長度，避免干擾主要資訊
-                                    content = str(item.get('content', ''))[:200]
-                                    all_items.append(f"【公告】單位:{unit} 標題:{item.get('title')} 內容:{content}")
+                                core_items.append(f"【行事曆】日期:{item.get('date')} 活動:{item.get('event')}")
+                        
+                        # 3. 處理公告 (放入公告區)
+                        elif file == 'nihs_knowledge_full.json':
+                            for item in data:
+                                unit = item.get('unit', '')
+                                content = str(item.get('content', ''))[:200]
+                                news_items.append(f"【公告】單位:{unit} 標題:{item.get('title')} 內容:{content}")
+
+            # 開始向量化 (分開處理)
+            print("🚀 正在建立核心資料庫 (Core Index)...")
+            self.core_vectors = self.embed_batch(core_items)
+            self.core_data = core_items
+
+            print("🚀 正在建立公告資料庫 (News Index)...")
+            self.news_vectors = self.embed_batch(news_items)
+            self.news_data = news_items
             
-            if not all_items: return
-
-            print(f"📡 準備向量化 {len(all_items)} 筆資料...")
-            batch_size = 50 
-            combined_embeddings = []
-
-            for i in range(0, len(all_items), batch_size):
-                batch = all_items[i : i + batch_size]
-                result = genai.embed_content(
-                    model=EMBED_MODEL,
-                    content=batch,
-                    task_type="retrieval_document"
-                )
-                combined_embeddings.extend(result['embedding'])
-                print(f"⏳ 進度: {min(i + batch_size, len(all_items))}/{len(all_items)}")
-
-            self.vectors = np.array(combined_embeddings).astype('float32')
-            self.source_data = all_items
             self.ready = True
-            print("✅ 雲端向量大腦啟動成功！")
-            
-        except Exception as e:
-            print(f"❌ 向量化失敗: {e}")
+            print(f"✅ 雙層大腦啟動完畢！核心:{len(core_items)}筆, 公告:{len(news_items)}筆")
 
-    def search(self, query, top_k=5):
-        """ 計算相似度找出最相關的資料 """
-        if not self.ready: return []
-        
-        try:
-            res = genai.embed_content(model=EMBED_MODEL, content=query, task_type="retrieval_query")
-            query_vec = np.array(res['embedding']).astype('float32')
-            
-            similarities = np.dot(self.vectors, query_vec) / (
-                np.linalg.norm(self.vectors, axis=1) * np.linalg.norm(query_vec) + 1e-10
-            )
-            
-            top_indices = np.argsort(similarities)[-top_k:][::-1]
-            
-            # 顯示 AI 抓到了什麼，方便除錯
-            results = [self.source_data[i] for i in top_indices]
-            print(f"🔍 用戶問: {query}")
-            print(f"📖 AI 抓到的前 {top_k} 筆標題: {[r[:20] for r in results]}")
-            
-            return results
         except Exception as e:
-            print(f"❌ 搜尋錯誤: {e}")
-            return []
+            print(f"❌ 初始化失敗: {e}")
+
+    def search_layer(self, query_vec, vectors, data, top_k=3):
+        """ 通用搜尋函式 """
+        if vectors is None or len(data) == 0: return [], []
+        
+        # 計算相似度
+        sims = np.dot(vectors, query_vec) / (
+            np.linalg.norm(vectors, axis=1) * np.linalg.norm(query_vec) + 1e-10
+        )
+        top_indices = np.argsort(sims)[-top_k:][::-1]
+        
+        results = [data[i] for i in top_indices]
+        scores = [sims[i] for i in top_indices]
+        return results, scores
 
     def ask(self, user_query):
-        if not self.ready: return "校園助手正在整理資料中，請稍候..."
+        if not self.ready: return "系統熱機中，請稍候..."
 
-        relevant_docs = self.search(user_query, top_k=5)
-        
-        if not relevant_docs:
-             return "您的問題很好！目前公告中暫時找不到相關資訊。建議您聯繫學校，我們會記錄並更新。"
+        try:
+            # 1. 取得問題向量
+            res = genai.embed_content(model=EMBED_MODEL, content=user_query, task_type="retrieval_query")
+            q_vec = np.array(res['embedding']).astype('float32')
 
-        context = "\n---\n".join(relevant_docs)
-        now = datetime.now()
+            final_docs = []
+            
+            # 🔍 第一層：搜核心區 (FAQ/行事曆)
+            core_docs, core_scores = self.search_layer(q_vec, self.core_vectors, self.core_data, top_k=3)
+            
+            # 判斷核心區是否有強關聯 (門檻值 0.55)
+            if core_docs and core_scores[0] > 0.55:
+                print(f"🎯 命中核心資料! 分數: {core_scores[0]}")
+                final_docs = core_docs
+            else:
+                # 🔍 第二層：搜公告區 (如果核心區沒找到好的)
+                print("🔄 核心區無明顯關聯，轉搜公告區...")
+                news_docs, news_scores = self.search_layer(q_vec, self.news_vectors, self.news_data, top_k=5)
+                final_docs = news_docs
 
-        prompt = f"""
-你是「內湖高工校園小幫手」。今天是西元 {now.year}年{now.month}月{now.day}日。
-請根據下方【參考資料】回答問題。
+            if not final_docs:
+                return "您的問題很好！目前公告中暫時找不到相關資訊。建議您聯繫學校，我們會記錄並更新。"
+
+            context = "\n---\n".join(final_docs)
+            now = datetime.now()
+
+            prompt = f"""
+你是「內湖高工校園小幫手」。今天是西元 {now.year}/{now.month}/{now.day}。
+請根據【參考資料】回答問題。
 
 【回答策略】：
-1. **優先順序**：若問題是關於「交通」、「電話」或「行事曆」，請優先使用標記為【學校交通資訊】或【學校聯絡電話】的資料。
-2. **誠實回答**：只要資料中有相關關鍵字，請整理出來，不要害怕回答。
-3. **格式**：親切、條列式、加強語氣。
-4. **日期轉換**：民國轉西元。
+1. **精準優先**：若資料來自【學校交通資訊】或【聯絡電話】，請直接給出答案，不需要廢話。
+2. **公告整理**：若資料來自【公告】，請摘要重點。
+3. **查無資料**：若資料與問題無關，請直接說找不到。
 
 【參考資料】：
 {context}
 
 【家長問題】：{user_query}
 """
-        try:
             model = genai.GenerativeModel(MODEL_NAME)
             response = model.generate_content(prompt, generation_config={"temperature": 0.3})
             return response.text
-        except:
+
+        except Exception as e:
+            print(f"❌ 問答錯誤: {e}")
             return "小幫手連線忙碌中，請稍後再試。"
 
-# 實例化
-brain = LightVectorBrain()
+brain = DualVectorBrain()
 
-# ==========================================
-# 🌐 路由區
-# ==========================================
 @app.route("/", methods=['GET'])
 def index(): return "Bot Live", 200
 
@@ -174,14 +192,12 @@ def callback():
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
+    except: abort(400)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_msg = event.message.text.strip()
-    reply = brain.ask(user_msg)
+    reply = brain.ask(event.message.text.strip())
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 if __name__ == "__main__":
