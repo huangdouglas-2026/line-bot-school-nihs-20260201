@@ -22,99 +22,95 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = Flask(__name__)
 
-# 檔案路徑
+# 📂 完整資料來源路徑
 DATA_FILE = 'nihs_knowledge_full.json'
+FAQ_FILE = 'nihs_faq.json'
+CALENDAR_FILE = 'nihs_calendar.json'
 
 # ==========================================
-# 🧠 AI 大腦 (美式積極服務模式)
+# 🧠 AI 大腦 (全量檢索 + 美式積極服務)
 # ==========================================
 class FullContextBrain:
     def __init__(self):
         self.ready = False
-        self.knowledge_data = []
-        self.load_data()
+        self.combined_context = ""
+        self.load_all_sources()
 
-    def load_data(self):
-        if os.path.exists(DATA_FILE):
-            try:
+    def load_all_sources(self):
+        """ 同時讀取三個檔案，確保資料不縮水 """
+        all_text_parts = []
+        try:
+            # 1. 載入全知資料庫 (主要公告與內容)
+            if os.path.exists(DATA_FILE):
                 with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                    self.knowledge_data = json.load(f)
-                self.ready = True
-            except: self.ready = False
-
-    def search(self, query, top_k=3):
-        # 簡單的檢索過濾 (未來可根據您的需求改為更複雜的搜尋)
-        results = [i for i in self.knowledge_data if query[:3] in str(i.values())]
-        return results[:top_k]
-
-    def ask(self, user_msg):
-        if not self.ready:
-            return "系統維護中：暫時無法存取資料庫，請稍後再試。"
-
-        found_data = self.search(user_msg, top_k=3)
-        
-        context_text = ""
-        source_url = ""
-        
-        for i, row in enumerate(found_data):
-            # 獲取主來源網址 (取第一筆)
-            if i == 0: source_url = row.get('url', '')
+                    data = json.load(f)
+                    for item in data:
+                        all_text_parts.append(f"【公告/知識】標題:{item.get('title')} 內容:{item.get('content')} 網址:{item.get('url')}")
             
-            # 處理附件
-            attachments = row.get('attachments', [])
-            attach_str = ", ".join([f"[{a.get('name')}]" for a in attachments if isinstance(a, dict)]) if attachments else ""
+            # 2. 載入 FAQ (地址、交通、電話)
+            if os.path.exists(FAQ_FILE):
+                with open(FAQ_FILE, 'r', encoding='utf-8') as f:
+                    faq = json.load(f)
+                    t = faq.get("traffic", {})
+                    all_text_parts.append(f"【基礎資訊】地址:{t.get('address')} 捷運:{t.get('mrt')} 公車:{t.get('bus')}")
+                    for c in faq.get("contacts", []):
+                        all_text_parts.append(f"【聯絡電話】{c.get('title')}({c.get('name')}):{c.get('phone')}")
+            
+            # 3. 載入行事曆 (日程活動)
+            if os.path.exists(CALENDAR_FILE):
+                with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
+                    cal = json.load(f)
+                    for ev in cal:
+                        all_text_parts.append(f"【行事曆】日期:{ev.get('date')} 活動:{ev.get('event')} 類別:{ev.get('category')}")
 
-            context_text += f"""
-【資料來源 {i+1}】
-標題：{row.get('title')}
-網址：{row.get('url')}
-附件：{attach_str}
-內容摘要：{str(row.get('content'))[:400]}...
---------------------------------
-"""
+            self.combined_context = "\n".join(all_text_parts)
+            self.ready = True
+            print(f"✅ 資料載入成功，總知識量：{len(all_text_parts)} 條")
+        except Exception as e:
+            print(f"❌ 資料載入失敗: {e}")
+            self.ready = False
 
-        # 🤖 更新後的 Prompt：加入美式服務風格指令
+    def ask(self, user_query):
+        if not self.ready:
+            return "系統正在更新資料庫，請稍後再試一次唷！"
+
+        # 構建注入所有來源的 Prompt
         prompt = f"""
 你是一個親切且積極的內湖高工校園小幫手。
-請根據下方的【檢索資料】回答家長的【問題】。
+請根據下方的【全量校園知識庫】回答家長的【問題】。
 
 【回答準則】：
-1. 語氣：親切、專業、充滿熱情（繁體中文）。
+1. 語氣：親切、專業、展現熱誠。
 2. **美式服務風格（針對查無資料時）**：
-   如果資料中找不到答案，請使用以下風格回覆：
    「您的問題很好！目前公告中暫時找不到相關資訊。建議家長您可以先直接聯繫學校詢問。同時，我們也會將您的問題記錄下來，並儘快更新在資料庫中，讓其他家長未來也可以參考。謝謝您幫助我們變得更好！」
-3. **資訊對等**：
-   - 如果有答案，請清晰條列，並適度使用 Emoji。
-   - 務必提到資料中出現的「網址」或「附件」下載提醒。
-4. **來源標註**：
-   - 不要在文中反覆貼網址，請在回答結束後統一標註。
+3. **資訊完整性**：
+   - 務必提及資料中的具體日期、分機、網址。
+   - 附件提醒：若資料有附件，提醒家長可點擊連結查看。
+4. **來源呈現**：
+   - 回答結束後，若有參考網址，請統一標註一次「👉 參考來源：[URL]」。
 
-【檢索資料】：
-{context_text if context_text else "EMPTY_DATABASE"}
+【全量校園知識庫內容】：
+{self.combined_context}
 
 【家長問題】：
-{user_msg}
+{user_query}
 
 【你的回答】：
 """
         try:
             model = genai.GenerativeModel(MODEL_NAME)
+            # 針對長內容調整設定
             response = model.generate_content(prompt)
-            reply = response.text
-            
-            # 只有在有資料且回答中沒包含 URL 時，才在最後補上來源
-            if source_url and source_url not in reply:
-                reply += f"\n\n🔗 來源資料參考：\n{source_url}"
-                
-            return reply
-        except:
-            return "您的問題很好！不過小幫手現在連線有點忙碌，可以請您稍後再試一次嗎？感謝您的耐心！"
+            return response.text
+        except Exception as e:
+            print(f"❌ AI 生成錯誤: {e}")
+            return "您的問題很好！但小幫手連線出了點小狀況，能請您再試一次嗎？感謝您的包容！"
 
 # 初始化
 brain = FullContextBrain()
 
 # ==========================================
-# 🌐 路由區
+# 🌐 路由區 (由 Render/地端接收訊息)
 # ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
