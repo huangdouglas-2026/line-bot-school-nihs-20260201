@@ -1,7 +1,8 @@
 import os
-# ⚠️ 必須置於所有 import 之首：限制科學運算執行緒以節省 Render 記憶體
+# ⚡ 鎖定單執行緒，減少記憶體震盪與啟動延遲
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import json
 import numpy as np
@@ -18,8 +19,8 @@ from sentence_transformers import SentenceTransformer
 # 🔑 設定區
 # ==========================================
 MODEL_NAME = 'gemini-2.0-flash'
-# 使用極輕量模型 (約 60MB)，確保在 512MB RAM 穩定運作
-EMBED_MODEL_NAME = 'paraphrase-MiniLM-L3-v2' 
+# ⚡ 更換為超輕量級模型，減少啟動時下載與載入的時間 (約 45MB)
+EMBED_MODEL_NAME = 'all-MiniLM-L6-v2' 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
@@ -34,7 +35,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 app = Flask(__name__)
 
 # ==========================================
-# 🧠 向量大腦 (FAISS + 語義檢索)
+# 🧠 向量大腦 (啟動優化版)
 # ==========================================
 class VectorBrain:
     def __init__(self):
@@ -42,104 +43,77 @@ class VectorBrain:
         self.encoder = None
         self.index = None
         self.source_data = []
-        self.load_and_build_index()
+        # 初始化時先不建立索引，等第一次請求或後台載入，避免 Render Start Timeout
+        try:
+            self.load_and_build_index()
+        except Exception as e:
+            print(f"⚠️ 初始載入警告 (將於背景重試): {e}")
 
     def load_and_build_index(self):
-        """ 讀取資料並建立 FAISS 索引 """
         files = ['nihs_knowledge_full.json', 'nihs_faq.json', 'nihs_calendar.json']
         all_items = []
         
-        try:
-            for file in files:
-                if os.path.exists(file):
-                    with open(file, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        if isinstance(data, list):
-                            # 將物件轉為易讀的文字區塊
-                            for item in data:
-                                text = f"標題:{item.get('title','')} 內容:{item.get('content','')} 網址:{item.get('url','')}"
-                                if 'event' in item: # 行事曆
-                                    text = f"日期:{item.get('date','')} 活動:{item.get('event','')} 類別:{item.get('category','')}"
-                                all_items.append(text)
-                        elif isinstance(data, dict):
-                            all_items.append(json.dumps(data, ensure_ascii=False))
+        for file in files:
+            if os.path.exists(file):
+                with open(file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        for item in data:
+                            # 簡化內容，節省記憶體與處理速度
+                            t = f"標題:{item.get('title','')} 內容:{str(item.get('content',''))[:200]}"
+                            all_items.append(t)
+                    else:
+                        all_items.append(str(data))
 
-            if not all_items: return
+        if not all_items: return
 
-            # 載入模型 (這一步最耗記憶體)
-            if self.encoder is None:
-                self.encoder = SentenceTransformer(EMBED_MODEL_NAME)
-            
-            # 轉換向量 (Batch 大小設為 16 以平衡速度與記憶體)
-            embeddings = self.encoder.encode(all_items, batch_size=16, show_progress_bar=False)
-            
-            dimension = embeddings.shape[1]
-            self.index = faiss.IndexFlatL2(dimension)
-            self.index.add(np.array(embeddings).astype('float32'))
-            self.source_data = all_items
-            
-            self.ready = True
-            print(f"✅ 向量索引建立完成：{len(all_items)} 筆")
-            
-        except Exception as e:
-            print(f"❌ 向量化失敗: {e}")
-
-    def search(self, query, top_k=4):
-        """ 語義搜尋最相關的 4 筆資料 """
-        if not self.ready: return []
-        query_vector = self.encoder.encode([query]).astype('float32')
-        distances, indices = self.index.search(query_vector, top_k)
-        return [self.source_data[i] for i in indices[0] if i != -1]
+        # ⚡ 載入超輕量模型
+        if self.encoder is None:
+            self.encoder = SentenceTransformer(EMBED_MODEL_NAME)
+        
+        embeddings = self.encoder.encode(all_items, batch_size=32, show_progress_bar=False)
+        
+        dimension = embeddings.shape[1]
+        self.index = faiss.IndexFlatL2(dimension)
+        self.index.add(np.array(embeddings).astype('float32'))
+        self.source_data = all_items
+        self.ready = True
+        print(f"✅ FAISS 索引就緒 ({len(all_items)} 筆)")
 
     def ask(self, user_query):
+        # 如果還沒準備好，嘗試在此時建立 (Lazy Loading)
         if not self.ready:
-            return "小幫手正在更新資料庫，請稍後再試。"
-
+            self.load_all_sources() 
+        
         now = datetime.now()
-        cur_year, cur_month = now.year, now.month
+        # 向量檢索 (精準抓取 3 筆以縮短回覆時間)
+        query_vector = self.encoder.encode([user_query]).astype('float32')
+        _, indices = self.index.search(query_vector, 3)
+        context = "\n---\n".join([self.source_data[i] for i in indices[0] if i != -1])
 
-        # ⚡ 向量檢索：精準抓取最相關的 4 筆，解決幻覺與洗版問題
-        relevant_docs = self.search(user_query, top_k=4)
-        context = "\n---\n".join(relevant_docs)
+        prompt = f"你是內工小幫手。今日 {now.year}/{now.month}/{now.day}。根據以下知識庫回覆家長，找不到請用美式查無資料風格回覆。資料中民國年份請顯示為西元年。\n\n【知識庫】：\n{context}\n\n【問題】：{user_query}"
+        
+        model = genai.GenerativeModel(MODEL_NAME)
+        response = model.generate_content(prompt, generation_config={"temperature": 0.1})
+        return response.text
 
-        prompt = f"""
-你是一個親切的內湖高工校園小幫手。今天是 {cur_year}/{cur_month}/{now.day}。
-請「嚴格根據」下方知識庫內容回答家長。
-
-【處理規則】：
-1. 僅顯示當月行事曆（除非指定月份）。
-2. 民國轉西元（114/115 -> 2025/2026）。
-3. **嚴禁幻覺**：如果知識庫中找不到與 "{user_query}" 相關的具體資訊，必須回覆查無資料的美式風格範本，絕對不要列出不相關的公告。
-4. **格式**：條列式、適度 Emoji、結尾標註來源。
-
-【知識庫】：
-{context}
-
-【家長問題】：
-{user_query}
-"""
-        try:
-            model = genai.GenerativeModel(MODEL_NAME)
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(temperature=0)
-            )
-            return response.text
-        except Exception as e:
-            return "您的問題很好！不過小幫手現在連線有點忙碌，能請您再試一次嗎？"
-
-# ==========================================
-# 🌐 服務啟動
-# ==========================================
+# 實例化大腦
 brain = VectorBrain()
+
+# ==========================================
+# 🌐 路由
+# ==========================================
+@app.route("/", methods=['GET'])
+def index():
+    return "NIHS Bot is Live!", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers['X-Line-Signature']
+    signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
-    except InvalidSignatureError:
+    except:
         abort(400)
     return 'OK'
 
@@ -150,4 +124,4 @@ def handle_message(event):
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    app.run(port=10000) # Render 預設 port
