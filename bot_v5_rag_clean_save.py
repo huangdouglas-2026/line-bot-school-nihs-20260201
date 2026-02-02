@@ -159,5 +159,26 @@ def handle_message(event):
     reply = brain.ask(user_msg)
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
+# 👇 新增這個診斷路徑
+@app.route("/status", methods=['GET'])
+def status():
+    # 檢查向量資料庫狀態
+    if not brain.ready:
+        return "⚠️ 腦袋尚未就緒 (Loading...)", 503
+    
+    count = len(brain.source_data)
+    # 顯示前 5 筆資料標題，確認它讀到了什麼
+    preview = "\n".join([s[:50] + "..." for s in brain.source_data[:5]])
+    
+    return f"""
+    <h1>🤖 機器人健康報告</h1>
+    <p>✅ 狀態: Online</p>
+    <p>📚 知識庫筆數: <strong>{count}</strong> 筆 (正常應約 1600 筆)</p>
+    <hr>
+    <h3>🔍 資料預覽 (前 5 筆):</h3>
+    <pre>{preview}</pre>
+    """, 200
+
 if __name__ == "__main__":
     app.run(port=10000)
+
