@@ -26,11 +26,10 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = Flask(__name__)
 
-# 取得目前程式所在的絕對路徑
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ==========================================
-# 🧠 SQLite 大腦 (AI 分類行事曆版)
+# 🧠 SQLite 大腦 (含 Debug 檢視器 + 行事曆優化)
 # ==========================================
 class SQLiteBrain:
     def __init__(self):
@@ -79,22 +78,30 @@ class SQLiteBrain:
                                               (f"聯絡電話 {c.get('title')}", f"電話:{c.get('phone')}", "電話", "置頂", "學校總機", "無", "無"))
                             count += 10
 
-                        # 2. 行事曆
+                        # 2. 行事曆 (nihs_calendar.json)
                         elif isinstance(data, list) and filename == 'nihs_calendar.json':
                             for item in data:
                                 if 'event' in item:
+                                    # 假設 JSON 裡沒有 url 欄位，我們手動補上學校行事曆網址
+                                    calendar_url = item.get('url', 'https://www.nihs.tp.edu.tw/nss/p/calendar')
                                     self.cursor.execute("INSERT INTO knowledge (title, content, category, date, unit, url, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                                                      (f"行事曆: {item.get('event')}", item.get('event'), "行事曆", item.get('date'), item.get('category', '教務處'), "無", "無"))
+                                                      (f"行事曆: {item.get('event')}", item.get('event'), "行事曆", item.get('date'), item.get('category', '教務處'), calendar_url, "無"))
                                     count += 1
 
-                        # 3. 公告
+                        # 3. 公告 (nihs_knowledge_full.json) - 校長資料應該在這裡
                         elif isinstance(data, list) and filename == 'nihs_knowledge_full.json':
                             for item in data:
                                 title = item.get('title', '')
-                                content = str(item.get('content', ''))
+                                # 確保將 List 或 Dict 類型的 content 轉為字串
+                                content_raw = item.get('content', '')
+                                if isinstance(content_raw, list):
+                                    content = " ".join(content_raw)
+                                else:
+                                    content = str(content_raw)
+                                
                                 unit = item.get('unit', '校務行政')
                                 date = item.get('date', '')
-                                url = item.get('url', '無')
+                                url = item.get('url', 'https://www.nihs.tp.edu.tw') # 若無網址則給首頁
                                 
                                 atts = item.get('attachments', [])
                                 att_str = ""
@@ -133,14 +140,14 @@ class SQLiteBrain:
             return msg
         return None
 
-    # 👉 行事曆專用查詢 (AI 分類版：全量抓取)
+    # 👉 行事曆查詢 (全量抓取 + 單一來源網址)
     def get_calendar(self, user_query):
         try:
             now = datetime.now()
             target_year = now.year
             target_month = now.month
 
-            # 1. 解析月份
+            # 解析月份
             match = re.search(r'(\d+|[一二三四五六七八九十]+)月', user_query)
             if match:
                 raw_month = match.group(1)
@@ -155,32 +162,31 @@ class SQLiteBrain:
                     target_month = 1
                     target_year += 1
 
-            # 2. SQL 查詢該月份所有活動 (不做任何 Python 過濾)
             query_date_str = f"{target_year}/{target_month:02d}%"
             
+            # 抓取資料
             sql = "SELECT date, unit, title, url, content FROM knowledge WHERE category='行事曆' AND date LIKE ? ORDER BY date ASC"
             self.cursor.execute(sql, (query_date_str,))
             rows = self.cursor.fetchall()
 
-            if not rows: return None, target_month
+            if not rows: return None, target_month, ""
 
-            # 3. 格式化原始資料給 AI
+            # 組合資料 (不重複列出網址)
             formatted_data = ""
+            source_url = "https://www.nihs.tp.edu.tw/nss/p/calendar" # 預設來源
+            
             for r in rows:
-                # 若無連結，給預設行事曆網址
-                link = r[3] if r[3] and r[3] != '無' else 'https://www.nihs.tp.edu.tw/nss/p/calendar'
-                formatted_data += f"""
-日期：{r[0]}
-活動：{r[4]}
-單位：{r[1]}
-連結：{link}
----
-"""
-            return formatted_data, target_month
+                # r[3] 是 url，如果該活動有特殊網址，我們更新 source_url (或保留最後一個)
+                if r[3] and r[3] != '無' and 'calendar' in r[3]:
+                    source_url = r[3]
+
+                formatted_data += f"{r[0]} | {r[4]} (單位:{r[1]})\n"
+
+            return formatted_data, target_month, source_url
 
         except Exception as e:
             print(f"❌ 行事曆查詢錯誤: {e}")
-            return None, 0
+            return None, 0, ""
 
     # 👉 一般 SQL 模糊檢索
     def search_db(self, query, top_n=5):
@@ -212,47 +218,46 @@ class SQLiteBrain:
             return ""
 
     def ask(self, user_query):
-        # 1. 直通車
         direct = self.check_rules(user_query)
         if direct: return direct
 
-        # 2. 行事曆查詢 (交給 AI 分類)
+        # --- 行事曆邏輯 ---
         if "行事曆" in user_query:
-            cal_data, month = self.get_calendar(user_query)
+            cal_data, month, source_url = self.get_calendar(user_query)
             
             if cal_data:
                 retrieved_data = cal_data
+                
+                # 這裡設定 Gemini 的指令
                 system_instruction = f"""
 你現在是內湖高工的行事曆秘書。使用者想查詢 {month} 月份的行事曆。
 我會提供該月份的「所有原始活動資料」，請你發揮判斷力，將這些活動區分為兩個區塊呈現：
 
 【區塊一：🏠 家長與學生重要日程】
 * 判斷標準：考試 (段考、模擬考)、放假 (補假、寒暑假)、註冊、繳費、全校性典禮、社團活動、競賽、升學相關。
-* **這是家長最關心的部分，請放在最前面。**
+* 請依日期排序。
 
 【區塊二：🏫 學校行政與教師事務】
-* 判斷標準：各類會議 (課務會議、校務會議)、設備檢查、作業抽查、教師研習、各處室填報作業。
-* 這是學校內部的行政流程，家長通常不需要參與。
+* 判斷標準：各類會議、設備檢查、作業抽查、教師研習。
+* 若該區塊無活動，請標註「無」。
 
-【格式要求】：
-1. 請務必保留原始連結 (URL)，讓使用者可以點擊。
-2. 依照日期排序。
-3. 如果該區塊沒有活動，請標註「本月無相關活動」。
+【結尾要求】：
+* 請在回覆的**最末端**，獨立一行列出原始參考資料來源。
+* 格式： 🌐 資料來源：[114學年度第2學期行事曆]({source_url})
 """
-                # 修改問題，引導 AI 處理
                 user_query = f"請幫我整理 {month} 月份的行事曆，請依照上述規則分類。\n\n【原始資料】：\n{cal_data}"
             else:
                 return f"🔍 查詢不到 {datetime.now().year}年 相關月份的行事曆資訊。"
 
+        # --- 一般搜尋邏輯 (校長問題會跑這) ---
         else:
-            # 3. 一般搜尋
             retrieved_data = self.search_db(user_query, top_n=5)
             system_instruction = "你是一個親切的內湖高工校園小幫手。請根據檢索資料回答問題，務必附上網址與附件連結。"
             
             if not retrieved_data:
                 return "您的問題很好！目前公告中暫時找不到相關資訊。建議您聯繫學校 (02-26574874)，我們會記錄並更新。"
 
-        # 4. 呼叫 Gemini
+        # --- 呼叫 Gemini ---
         now = datetime.now()
         prompt = f"""
 {system_instruction}
@@ -272,8 +277,52 @@ class SQLiteBrain:
 
 brain = SQLiteBrain()
 
+# ==========================================
+# 🕵️‍♂️ Debug 檢視器 (新增功能)
+# ==========================================
+@app.route("/debug", methods=['GET'])
+def debug_page():
+    try:
+        # 1. 查詢資料總筆數
+        brain.cursor.execute("SELECT category, COUNT(*) FROM knowledge GROUP BY category")
+        stats = brain.cursor.fetchall()
+        
+        # 2. 查詢「校長」相關資料
+        brain.cursor.execute("SELECT id, title, date, unit FROM knowledge WHERE title LIKE '%校長%' OR content LIKE '%校長%'")
+        principal_rows = brain.cursor.fetchall()
+
+        # 3. 查詢最近 5 筆行事曆
+        brain.cursor.execute("SELECT id, date, content, url FROM knowledge WHERE category='行事曆' ORDER BY date ASC LIMIT 5")
+        calendar_rows = brain.cursor.fetchall()
+
+        # 產生 HTML
+        html = "<h1>🕵️‍♂️ 內湖高工 Bot 資料庫診斷</h1>"
+        html += "<h3>📊 資料統計</h3><ul>"
+        for s in stats:
+            html += f"<li>{s[0]}: {s[1]} 筆</li>"
+        html += "</ul>"
+
+        html += "<h3>👨‍🏫 搜尋 '校長' 結果 (確認資料是否存在)</h3>"
+        if principal_rows:
+            html += "<table border='1'><tr><th>ID</th><th>標題</th><th>日期</th><th>單位</th></tr>"
+            for r in principal_rows:
+                html += f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td></tr>"
+            html += "</table>"
+        else:
+            html += "<p style='color:red;'>❌ 查無 '校長' 相關資料！請檢查 nihs_knowledge_full.json</p>"
+
+        html += "<h3>📅 行事曆前 5 筆 (確認 URL)</h3>"
+        html += "<table border='1'><tr><th>ID</th><th>日期</th><th>活動內容</th><th>URL</th></tr>"
+        for r in calendar_rows:
+            html += f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td></tr>"
+        html += "</table>"
+        
+        return html
+    except Exception as e:
+        return f"<h1>❌ Debug Error</h1><p>{str(e)}</p>"
+
 @app.route("/", methods=['GET'])
-def index(): return "Bot Live (AI Calendar)", 200
+def index(): return "Bot Live (Debug Enabled)", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
