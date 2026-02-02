@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import google.generativeai as genai
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
@@ -9,148 +10,144 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 # ==========================================
 # 🔑 設定區
 # ==========================================
+# 依要求統一使用 gemini-2.0-flash
+MODEL_NAME = 'gemini-2.0-flash'
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 
-# 初始化
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-if LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET:
-    line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-    handler = WebhookHandler(LINE_CHANNEL_SECRET)
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = Flask(__name__)
+
+# 檔案路徑
 DATA_FILE = 'nihs_knowledge_full.json'
+FAQ_FILE = 'nihs_faq.json'
+CALENDAR_FILE = 'nihs_calendar.json'
 
 # ==========================================
-# 🧠 AI 大腦 (Gemini 2.0 Flash - 親切排版版)
+# 🧠 AI 大腦 (Apple Keynote Style Edition)
 # ==========================================
-class FullContextBrain:
-    def __init__(self, json_path):
+class SmartBrain:
+    def __init__(self):
         self.knowledge_text = ""
-        self.load_data(json_path)
+        self.faq_data = {}
+        self.calendar_data = []
+        self.load_all_data()
 
-    def load_data(self, path):
-        """ 讀取 JSON 並保留詳細資訊 """
-        if not os.path.exists(path):
-            self.knowledge_text = "目前系統資料庫遺失 >_<"
-            return
-        
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
+    def load_all_data(self):
+        """ 載入所有整合後的資料源 """
+        # 1. 載入全知資料庫
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
-            print(f"📂 [系統] 正在載入 {len(data)} 筆資料...")
-            
-            text_parts = []
-            for item in data:
-                # 欄位讀取
-                date = item.get('date', '無日期')
-                unit = item.get('unit', '無單位')
-                title = item.get('title', '無標題')
-                content = item.get('content', '無內容')
-                url = item.get('url', '無連結')
+                # 為了 RAG 效能，抓取前 50 筆重要條目作為上下文
+                self.knowledge_text = "\n".join([f"【{i.get('title')}】\n{i.get('content')[:400]}" for i in data[:50]])
+        
+        # 2. 載入 FAQ (交通/電話)
+        if os.path.exists(FAQ_FILE):
+            with open(FAQ_FILE, 'r', encoding='utf-8') as f:
+                self.faq_data = json.load(f)
+
+        # 3. 載入行事曆
+        if os.path.exists(CALENDAR_FILE):
+            with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
+                self.calendar_data = json.load(f)
+
+    def format_keynote_layout(self, title_text, items):
+        """ 
+        核心格式：Apple Keynote 風格 
+        1. 標題用 ◤ ◢ 包裹
+        2. 項目之間空一行
+        3. 使用細緻符號 ◈
+        """
+        header = f"◤  {title_text}  ◢\n━━━━━━━━━━━━━━\n\n"
+        body = ""
+        for item in items:
+            body += f"{item}\n\n"
+        
+        footer = "━━━━━━━━━━━━━━\n  由 內工小幫手 簡約呈現"
+        return header + body + footer
+
+    def check_static_logic(self, user_query):
+        """ 靜態資料攔截器：優先處理行事曆與通訊錄 """
+        q = user_query.lower()
+
+        # A. 行事曆查詢
+        if any(k in q for k in ["行事曆", "日程", "日期", "什麼時候"]):
+            month_match = re.search(r'(\d+)月', q)
+            if month_match:
+                m = month_match.group(1).zfill(2)
+                matched = [f"◈  {e['date'].split('/')[-2]}.{e['date'].split('/')[-1]}\n   {e['event']}" 
+                           for e in self.calendar_data if f"/{m}/" in e['date']]
+                if matched:
+                    return self.format_keynote_layout(f"{m}月 重點日程", matched[:6])
+            elif self.calendar_data:
+                # 顯示最近 5 筆
+                recent = [f"◈  {e['date'].replace('2026/','')}\n   {e['event']}" for e in self.calendar_data[:5]]
+                return self.format_keynote_layout("近期校園日程", recent)
+
+        # B. 交通與通訊查詢
+        if any(k in q for k in ["電話", "分機", "地址", "交通", "怎麼去"]):
+            if self.faq_data:
+                items = []
+                if any(k in q for k in ["地址", "交通"]):
+                    t = self.faq_data.get("traffic", {})
+                    items.append(f"◈  學校地址\n   {t.get('address')}")
+                    items.append(f"◈  交通引導\n   {t.get('mrt')}")
+                else:
+                    contacts = self.faq_data.get("contacts", [])
+                    # 關鍵字篩選職稱
+                    found = [f"◈  {c['title']} {c['name']}\n   {c['phone']}" for c in contacts if any(k in c['title'] for k in [q.replace("電話","")])]
+                    items = found[:4] if found else [f"◈  {c['title']}\n   {c['phone']}" for c in contacts[:4]]
                 
-                # 附件處理
-                attachments = item.get('attachments', [])
-                attach_str = "無"
-                if isinstance(attachments, list) and len(attachments) > 0:
-                    names = []
-                    for a in attachments:
-                        if isinstance(a, dict):
-                            names.append(a.get('name', '附件'))
-                        else:
-                            names.append(str(a))
-                    attach_str = ", ".join(names)
+                if items:
+                    return self.format_keynote_layout("校園通訊錄", items)
+        
+        return None
 
-                # 組合資料塊
-                part = f"""
-【日期】：{date}
-【單位】：{unit}
-【標題】：{title}
-【網址】：{url}
-【附件】：{attach_str}
-【內容】：{content}
---------------------------------"""
-                text_parts.append(part)
-            
-            self.knowledge_text = "\n".join(text_parts)
-            print(f"✅ [系統] 資料載入完成！")
-            
-        except Exception as e:
-            print(f"❌ 讀取資料失敗: {e}")
-            self.knowledge_text = "資料讀取發生錯誤。"
+    def ask_ai(self, user_query):
+        """ 
+        RAG 查詢：針對複雜問題呼叫 Gemini-2.0-Flash 
+        """
+        # 先嘗試靜態匹配
+        static_res = self.check_static_logic(user_query)
+        if static_res: return static_res
 
-    def ask(self, user_query):
-        """ 注入『親切+Emoji』的 Prompt """
-        if not self.knowledge_text:
-            return "系統現在有點累，讀不到資料庫 >_< 請稍後再試！"
-
-        # ✨ 這是讓回應變可愛的關鍵 Prompt ✨
+        # 若無匹配，則詢問 AI 並要求 Keynote 格式
         prompt = f"""
-        角色設定：你是內湖高工的 AI 虛擬小志工，名叫「內工小幫手」。
-        個性：熱情、有禮貌、喜歡用 Emoji 讓對話更生動，但回答問題時邏輯清晰。
-
-        任務：請閱讀下方的【校園知識庫】，回答家長或同學的【問題】。
-
-        【回覆風格與排版要求】：
-        1. 🎨 **排版要舒服**：
-           - 請多用「條列式」列出重點，不要給一大塊密密麻麻的文字。
-           - 善用空行來區隔不同段落。
+        你是一位極簡主義的校務助理。請根據【資料庫】回答問題。
         
-        2. 😊 **語氣要軟性**：
-           - 不要太像機器人，可以使用「您好呀～」、「這邊幫您找到...」、「請參考以下資訊」等親切用語。
-        
-        3. ✨ **適度使用 Emoji**：
-           - 在標題、關鍵字、日期或連結旁加入對應符號。
-           - 例如：📅 日期, 🔗 連結, 🏫 學校, 💡 提醒, 🏆 榮譽, 📢 公告。
+        【視覺格式限定：Apple Keynote 風格】
+        1. 標題請用「◤ 」與「 ◢」包裹。
+        2. 每一項活動或重點之間必須空一行。
+        3. 使用 ◈ 符號。
+        4. 結尾加上「  由 內工小幫手 簡約呈現」。
+        5. 嚴禁廢話，保持專業留白。
 
-        4. 🔗 **連結與附件 (非常重要)**：
-           - 如果資料有網址 (URL)，請務必換行獨立列出，並加上「👉 點擊查看公告」之類的引導。
-           - 如果有附件，請加上 📎 符號提醒。
-
-        5. 🚫 **誠實至上**：
-           - 如果資料庫真的找不到答案，請用遺憾但禮貌的語氣說「不好意思，目前的公告裡沒看到相關資訊耶 >_<」，並建議直接詢問處室。
-
-        【校園知識庫內容】：
+        【資料庫內容】：
         {self.knowledge_text}
 
-        【使用者問題】：
-        {user_query}
+        【問題】：{user_query}
         """
-
         try:
-            # 使用 Gemini 2.0 Flash
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            
-            # 設定稍微高一點的 temperature 讓語氣更活潑 (0.7 ~ 0.8)
-            generation_config = genai.types.GenerationConfig(
-                temperature=0.75
-            )
-            
-            response = model.generate_content(prompt, generation_config=generation_config)
+            model = genai.GenerativeModel(MODEL_NAME)
+            response = model.generate_content(prompt)
             return response.text
-        except Exception as e:
-            print(f"❌ API Error: {e}")
-            return "AI 大腦現在有點打結 (連線忙碌中)，請再問我一次試試看！🙏"
+        except:
+            return "◤  系統提醒  ◢\n━━━━━━━━━━━━━━\n\n▷  服務暫時忙碌\n   請稍後再試\n\n  NIHS AI"
 
-# 賴皮啟動
-brain = None
-def get_brain():
-    global brain
-    if brain is None:
-        brain = FullContextBrain(DATA_FILE)
-    return brain
+# 初始化
+brain = SmartBrain()
 
 # ==========================================
 # 🌐 路由區
 # ==========================================
-@app.route("/", methods=['GET'])
-def home():
-    return "Hello! NIHS Bot V9 (Emoji Edition) is ready! ✨", 200
-
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -163,21 +160,11 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    msg = event.message.text.strip()
-    print(f"🗣️ 家長問: {msg}")
-
-    try:
-        current_brain = get_brain()
-        reply_text = current_brain.ask(msg)
-        
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_text)
-        )
-        print("✅ 已回覆")
-
-    except Exception as e:
-        print(f"❌ 錯誤: {e}")
+    user_msg = event.message.text.strip()
+    # 每次對話時重新載入資料確保最新 (可選)
+    # brain.load_all_data() 
+    reply = brain.ask_ai(user_msg)
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 if __name__ == "__main__":
     app.run(port=5000)
