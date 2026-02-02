@@ -1,26 +1,22 @@
 import os
-# ⚡ 鎖定單執行緒，減少記憶體震盪與啟動延遲
+# ⚡ 鎖定單執行緒，這在 Render 的受限環境中能提供最高穩定性
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import json
 import numpy as np
-import faiss
 import google.generativeai as genai
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from datetime import datetime
-from sentence_transformers import SentenceTransformer
 
 # ==========================================
 # 🔑 設定區
 # ==========================================
 MODEL_NAME = 'gemini-2.0-flash'
-# ⚡ 更換為超輕量級模型，減少啟動時下載與載入的時間 (約 45MB)
-EMBED_MODEL_NAME = 'all-MiniLM-L6-v2' 
+EMBED_MODEL = 'models/text-embedding-004' # Google 雲端向量模型
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
@@ -35,77 +31,117 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 app = Flask(__name__)
 
 # ==========================================
-# 🧠 向量大腦 (啟動優化版)
+# 🧠 輕量化大腦 (API 向量檢索版)
 # ==========================================
-class VectorBrain:
+class LightVectorBrain:
     def __init__(self):
         self.ready = False
-        self.encoder = None
-        self.index = None
         self.source_data = []
-        # 初始化時先不建立索引，等第一次請求或後台載入，避免 Render Start Timeout
-        try:
-            self.load_and_build_index()
-        except Exception as e:
-            print(f"⚠️ 初始載入警告 (將於背景重試): {e}")
+        self.vectors = None
+        self.load_and_vectorize()
 
-    def load_and_build_index(self):
+    def load_and_vectorize(self):
+        """ 讀取資料並『分批』透過 API 取得向量 """
         files = ['nihs_knowledge_full.json', 'nihs_faq.json', 'nihs_calendar.json']
         all_items = []
         
-        for file in files:
-            if os.path.exists(file):
-                with open(file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        for item in data:
-                            # 簡化內容，節省記憶體與處理速度
-                            t = f"標題:{item.get('title','')} 內容:{str(item.get('content',''))[:200]}"
-                            all_items.append(t)
-                    else:
-                        all_items.append(str(data))
+        try:
+            for file in files:
+                if os.path.exists(file):
+                    with open(file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if file == 'nihs_faq.json':
+                            # FAQ 處理
+                            all_items.append(f"【地址交通】{data['traffic']['address']} {data['traffic']['mrt']}")
+                            for c in data.get('contacts', []):
+                                all_items.append(f"【聯絡電話】{c.get('title')}: {c.get('phone')}")
+                        elif isinstance(data, list):
+                            for item in data:
+                                if 'event' in item: # 行事曆
+                                    all_items.append(f"【行事曆】日期:{item.get('date')} 活動:{item.get('event')}")
+                                else: # 公告
+                                    all_items.append(f"【公告】標題:{item.get('title')} 內容:{str(item.get('content'))[:200]}")
+            
+            if not all_items: return
 
-        if not all_items: return
+            print(f"📡 準備向量化 {len(all_items)} 筆資料...")
+            batch_size = 50  # 每批 50 筆，符合免費版限制
+            combined_embeddings = []
 
-        # ⚡ 載入超輕量模型
-        if self.encoder is None:
-            self.encoder = SentenceTransformer(EMBED_MODEL_NAME)
+            for i in range(0, len(all_items), batch_size):
+                batch = all_items[i : i + batch_size]
+                result = genai.embed_content(
+                    model=EMBED_MODEL,
+                    content=batch,
+                    task_type="retrieval_document"
+                )
+                combined_embeddings.extend(result['embedding'])
+                print(f"⏳ 進度: {min(i + batch_size, len(all_items))}/{len(all_items)}")
+
+            self.vectors = np.array(combined_embeddings).astype('float32')
+            self.source_data = all_items
+            self.ready = True
+            print("✅ 雲端向量大腦啟動成功！")
+            
+        except Exception as e:
+            print(f"❌ 向量化失敗: {e}")
+
+    def search(self, query, top_k=3):
+        """ 計算相似度找出最相關的 3 筆資料 """
+        if not self.ready: return []
         
-        embeddings = self.encoder.encode(all_items, batch_size=32, show_progress_bar=False)
-        
-        dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(dimension)
-        self.index.add(np.array(embeddings).astype('float32'))
-        self.source_data = all_items
-        self.ready = True
-        print(f"✅ FAISS 索引就緒 ({len(all_items)} 筆)")
+        try:
+            # 1. 取得問題向量
+            res = genai.embed_content(model=EMBED_MODEL, content=query, task_type="retrieval_query")
+            query_vec = np.array(res['embedding']).astype('float32')
+            
+            # 2. 餘弦相似度計算
+            similarities = np.dot(self.vectors, query_vec) / (
+                np.linalg.norm(self.vectors, axis=1) * np.linalg.norm(query_vec) + 1e-10
+            )
+            
+            # 3. 取得前 k 名索引
+            top_indices = np.argsort(similarities)[-top_k:][::-1]
+            return [self.source_data[i] for i in top_indices]
+        except: return []
 
     def ask(self, user_query):
-        # 如果還沒準備好，嘗試在此時建立 (Lazy Loading)
-        if not self.ready:
-            self.load_all_sources() 
-        
+        if not self.ready: return "校園助手正在整理資料中，請稍候..."
+
+        # ⚡ 檢索與當前時間
+        relevant_docs = self.search(user_query, top_k=3)
+        context = "\n---\n".join(relevant_docs)
         now = datetime.now()
-        # 向量檢索 (精準抓取 3 筆以縮短回覆時間)
-        query_vector = self.encoder.encode([user_query]).astype('float32')
-        _, indices = self.index.search(query_vector, 3)
-        context = "\n---\n".join([self.source_data[i] for i in indices[0] if i != -1])
 
-        prompt = f"你是內工小幫手。今日 {now.year}/{now.month}/{now.day}。根據以下知識庫回覆家長，找不到請用美式查無資料風格回覆。資料中民國年份請顯示為西元年。\n\n【知識庫】：\n{context}\n\n【問題】：{user_query}"
-        
-        model = genai.GenerativeModel(MODEL_NAME)
-        response = model.generate_content(prompt, generation_config={"temperature": 0.1})
-        return response.text
+        prompt = f"""你是「內湖高工校園小幫手」。今天是西元 {now.year}年{now.month}月{now.day}日。
+請「嚴格根據」下方知識庫內容回答。
 
-# 實例化大腦
-brain = VectorBrain()
+【處理邏輯】：
+1. 僅顯示當月行事曆（除非指定月份）。
+2. 民國轉西元。
+3. **美式服務風格**：若知識庫中無相關資訊，請回覆：「您的問題很好！目前公告中暫時找不到相關資訊。建議您聯繫學校，我們會記錄並更新。」
+4. **禁止幻覺**：不准回答知識庫以外的內容。
+
+【知識庫】：
+{context}
+
+【家長問題】：{user_query}
+"""
+        try:
+            model = genai.GenerativeModel(MODEL_NAME)
+            response = model.generate_content(prompt, generation_config={"temperature": 0})
+            return response.text
+        except:
+            return "小幫手連線忙碌中，請稍後再試。"
+
+# 實例化
+brain = LightVectorBrain()
 
 # ==========================================
-# 🌐 路由
+# 🌐 路由區
 # ==========================================
 @app.route("/", methods=['GET'])
-def index():
-    return "NIHS Bot is Live!", 200
+def index(): return "Bot Live", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -113,7 +149,7 @@ def callback():
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
-    except:
+    except InvalidSignatureError:
         abort(400)
     return 'OK'
 
@@ -124,4 +160,4 @@ def handle_message(event):
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 if __name__ == "__main__":
-    app.run(port=10000) # Render 預設 port
+    app.run(port=10000)
