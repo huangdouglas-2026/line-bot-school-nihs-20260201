@@ -51,21 +51,30 @@ jobs:
         echo "🔄 [5/5] 整合全知資料庫 (Apple Keynote Style Ready)..."
         python merge_data.py
 
+    # ---------------------------------------------------
+    # 修正後的步驟 5: 檢查變更並上傳 (強效抗衝突版)
+    # ---------------------------------------------------
     - name: Commit and Push changes
       run: |
         git config --global user.name "GitHub Action Bot"
         git config --global user.email "actions@github.com"
         
-        # 加入所有產出的核心資料
+        # 1. 將產出的 JSON 檔案加入追蹤
         git add nihs_knowledge_full.json nihs_faq.json nihs_calendar.json || true
         
         timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
         
-        if git commit -m "Auto-update data: ${timestamp} (Early Morning Schedule)"; then
-          echo "✅ 提交成功，同步遠端..."
+        # 2. 只有在有變動時才執行 Commit
+        if git commit -m "Auto-update data: ${timestamp}"; then
+          echo "✅ 有新資料，準備同步遠端..."
+          
+          # ⚠️【核心修復】設定拉取策略並執行 rebase
+          # 這會處理「遠端已有更新」的問題
           git pull --rebase origin main
-          git push
-          echo "🚀 推送完成！台灣時間 03:00 更新任務達成。"
+          
+          # 3. 執行推送
+          git push origin main
+          echo "🚀 資料庫已成功同步至 GitHub！"
         else
-          echo "⚠️ 資料無變動。"
+          echo "⚠️ 資料沒有變更，跳過推送。"
         fi
