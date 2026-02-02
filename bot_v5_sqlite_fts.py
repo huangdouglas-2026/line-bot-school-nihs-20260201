@@ -29,7 +29,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ==========================================
-# 🧠 SQLite 大腦 (智慧關鍵字拆解版)
+# 🧠 SQLite 大腦 (Agentic RAG - AI 驅動搜尋版)
 # ==========================================
 class SQLiteBrain:
     def __init__(self):
@@ -78,7 +78,7 @@ class SQLiteBrain:
                                               (f"聯絡電話 {c.get('title')}", f"電話:{c.get('phone')}", "電話", "置頂", "學校總機", "無", "無"))
                             count += 10
 
-                        # 2. 行事曆 (nihs_calendar.json)
+                        # 2. 行事曆
                         elif isinstance(data, list) and filename == 'nihs_calendar.json':
                             for item in data:
                                 if 'event' in item:
@@ -86,20 +86,15 @@ class SQLiteBrain:
                                                       (f"行事曆: {item.get('event')}", item.get('event'), "行事曆", item.get('date'), item.get('category', '教務處'), "無", "無"))
                                     count += 1
 
-                        # 3. 完整公告 (nihs_knowledge_full.json) - 重點在這裡
+                        # 3. 公告
                         elif isinstance(data, list) and filename == 'nihs_knowledge_full.json':
                             for item in data:
                                 title = item.get('title', '')
-                                
-                                # 🔥 確保內容被轉成純文字，增加搜尋命中率
                                 content_raw = item.get('content', '')
                                 if isinstance(content_raw, list):
                                     content = " ".join([str(x) for x in content_raw])
                                 else:
                                     content = str(content_raw)
-                                
-                                # 移除多餘的空白，讓 "校　長" 變成 "校長" (雖然原始資料保留，但可增加一欄 clean_content 做搜尋優化，這裡先簡單處理)
-                                # content = content.replace("　", "") 
                                 
                                 category = item.get('category', '公告')
                                 unit = item.get('unit', '校務行政')
@@ -119,7 +114,7 @@ class SQLiteBrain:
         except Exception as e:
             print(f"❌ 資料載入失敗: {e}")
 
-    # 👉 規則直通車
+    # 👉 規則直通車 (保留最基本的即可，其他交給 AI)
     def check_rules(self, query):
         q = query.lower()
         if any(k in q for k in ['交通', '地址', '在哪', '捷運', '公車', '怎麼去']):
@@ -166,7 +161,6 @@ class SQLiteBrain:
 
             if not rows: return None, target_month, ""
 
-            # 嘗試抓取真實行事曆連結
             calendar_source_url = "https://www.nihs.tp.edu.tw/nss/p/calendar"
             try:
                 self.cursor.execute("SELECT url FROM knowledge WHERE title LIKE '%114%行事曆%' AND (category='公告' OR category='校園靜態資訊') LIMIT 1")
@@ -183,36 +177,44 @@ class SQLiteBrain:
         except Exception as e:
             return None, 0, ""
 
-    # 👉 🔥 核心修正：智慧多重搜尋 (Smart Search)
-    def search_db(self, query, top_n=10): # 增加 top_n 讓 Gemini 讀多一點資料
+    # 🔥🔥🔥 核心升級：AI 產生搜尋關鍵字 (Query Expansion) 🔥🔥🔥
+    def generate_search_keywords(self, user_query):
+        """
+        讓 Gemini 把使用者的口語問題，轉換成資料庫容易查到的 3 組關鍵字。
+        例如：「校長叫什麼」 -> ['校長', '林俊岳', '校長室']
+        例如：「合作社有泡麵嗎」 -> ['員生社', '販售', '熱食']
+        """
         try:
-            # 1. 關鍵字拆解：將 "校長姓名" 拆為 ["校長", "姓名"]
-            # 簡單邏輯：如果是長句，每兩個字切一刀；或直接取關鍵名詞
-            # 這裡使用簡單的「單字 + 雙字」拆解策略
-            
-            keywords = []
-            
-            # 如果使用者輸入很短 (如 "校長")，直接搜
-            if len(query) <= 2:
-                keywords.append(query)
-            else:
-                # 簡單分詞：取前兩個字 (如 "校長")，取後兩個字 (如 "泡麵")
-                # 這能有效解決 "校長姓名" 這種複合詞
-                keywords.append(query) # 原句
-                keywords.append(query[:2]) # 前兩字
-                if len(query) > 2:
-                    keywords.append(query[-2:]) # 後兩字
+            model = genai.GenerativeModel(MODEL_NAME)
+            prompt = f"""
+你是一個資料庫檢索專家。使用者的問題是：「{user_query}」。
+請幫我聯想 3 到 5 個最可能出現在學校公告或規章中的「正式關鍵字」，用來搜尋這個問題的答案。
+請用 Python List 格式回傳，不要有其他文字。
+例如：
+使用者：校長是誰
+回傳：['校長', '林俊岳', '校長室', '業務職掌']
+使用者：合作社有賣什麼
+回傳：['員生社', '販售', '熱食', '供餐', '菜單']
 
-            # 去除重複並過濾過短的
-            keywords = list(set([k for k in keywords if len(k) >= 2]))
-            
-            if not keywords: keywords = [query]
+現在請回傳：「{user_query}」的關鍵字。
+"""
+            response = model.generate_content(prompt, generation_config={"temperature": 0.1})
+            text = response.text.strip()
+            # 簡單清理格式
+            text = text.replace("```json", "").replace("```python", "").replace("```", "")
+            keywords = eval(text) # 將字串轉為 List
+            if isinstance(keywords, list):
+                print(f"🧠 AI 聯想關鍵字: {keywords}")
+                return keywords
+            return [user_query]
+        except Exception as e:
+            print(f"❌ AI 聯想失敗: {e}")
+            return [user_query] # 失敗就用原字
 
-            print(f"🔍 搜尋關鍵字: {keywords}") # Debug 用
-
-            # 2. 動態 SQL 生成：使用 OR 邏輯
-            # WHERE (title LIKE %k1% OR content LIKE %k1%) OR (title LIKE %k2% OR content LIKE %k2%)
-            
+    # 👉 智慧多重搜尋
+    def search_db(self, keywords, top_n=10):
+        try:
+            # 使用 AI 產生的關鍵字群進行 OR 搜尋
             conditions = []
             params = []
             for k in keywords:
@@ -256,7 +258,7 @@ class SQLiteBrain:
         direct = self.check_rules(user_query)
         if direct: return direct
 
-        # 行事曆
+        # 行事曆邏輯不變
         if "行事曆" in user_query:
             cal_data, month, source_url = self.get_calendar(user_query)
             if cal_data:
@@ -270,19 +272,20 @@ class SQLiteBrain:
             else:
                 return f"🔍 查詢不到 {datetime.now().year}年 相關月份的行事曆資訊。"
 
-        # 一般搜尋 (校長、合作社)
+        # 🔥🔥🔥 這裡改成 Agentic 模式 🔥🔥🔥
         else:
-            retrieved_data = self.search_db(user_query, top_n=8) # 抓多一點給 AI 判斷
+            # 1. 先問 AI：我該搜什麼？
+            ai_keywords = self.generate_search_keywords(user_query)
             
-            # 🔥 Prompt 優化：讓 Gemini 知道它的任務是「閱讀理解」
+            # 2. 用 AI 的關鍵字去搜
+            retrieved_data = self.search_db(ai_keywords, top_n=8)
+            
             system_instruction = """
 你是一個聰明的內湖高工校園小幫手。
-使用者的問題可能無法直接從關鍵字找到答案，你需要「閱讀」下方的檢索資料來推理。
-
-【特殊任務】：
-1. **校長資訊**：若檢索資料中有提到「校長室」、「業務職掌」或「林俊岳」，請整理出校長姓名與聯絡方式。
-2. **合作社/泡麵**：若檢索資料中有提到「員生社」、「販賣」、「食品」或「熱食部」，請查看內容是否有提到相關商品。若資料中完全沒提到販賣項目，請回答「資料庫中尚無合作社詳細販售清單」。
-3. **網址**：請務必附上該筆資料的網址。
+請仔細閱讀下方的檢索資料來回答使用者的問題。
+1. **校長資訊**：若資料有提到校長姓名 (如林俊岳) 或職掌，請明確回答。
+2. **網址**：請務必附上該筆資料的網址。
+3. **誠實**：若檢索資料裡真的完全沒提到使用者問的內容（例如泡麵），請說「目前公告資料庫中未包含詳細販售清單」。
 """
             if not retrieved_data:
                 return "您的問題很好！目前公告資料庫中暫時找不到相關資訊。建議您聯繫學校 (02-26574874)，我們會記錄並更新。"
@@ -312,20 +315,19 @@ def debug_page():
     try:
         brain.cursor.execute("SELECT category, COUNT(*) FROM knowledge GROUP BY category")
         stats = brain.cursor.fetchall()
-        brain.cursor.execute("SELECT id, title, content FROM knowledge WHERE content LIKE '%校長%' LIMIT 5")
-        principal_rows = brain.cursor.fetchall()
+        # 顯示 AI 會怎麼拆解「校長」
+        ai_brain = brain.generate_search_keywords("校長是誰")
         
-        html = "<h1>🕵️‍♂️ 資料庫診斷</h1>"
+        html = "<h1>🕵️‍♂️ 資料庫診斷 & AI 測試</h1>"
+        html += f"<h3>🧠 AI 對 '校長是誰' 的聯想關鍵字：{ai_brain}</h3>"
         html += "<h3>📊 分類統計</h3><ul>"
         for s in stats: html += f"<li>{s[0]}: {s[1]} 筆</li>"
         html += "</ul>"
-        html += "<h3>👨‍🏫 校長資料檢查</h3>"
-        for r in principal_rows: html += f"<p>ID:{r[0]} | {r[1]}...</p>"
         return html
     except Exception as e: return str(e)
 
 @app.route("/", methods=['GET'])
-def index(): return "Bot Live (Smart Search)", 200
+def index(): return "Bot Live (Agentic AI)", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
