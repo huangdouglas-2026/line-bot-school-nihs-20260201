@@ -29,7 +29,7 @@ FAQ_FILE = 'nihs_faq.json'
 CALENDAR_FILE = 'nihs_calendar.json'
 
 # ==========================================
-# 🧠 AI 大腦 (家長利益優先 + Keynote Style)
+# 🧠 AI 大腦 (Keynote Style + 來源精準標註)
 # ==========================================
 class SmartBrain:
     def __init__(self):
@@ -51,67 +51,55 @@ class SmartBrain:
             with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
                 self.calendar_data = json.load(f)
 
-    def check_calendar_logic(self, query):
-        """ 專門處理行事曆：剔除行政代號，聚焦學生與家長利益 """
+    def check_static_faq(self, query):
+        """ 處理基礎通訊與交通 (此類不強烈要求外部來源網址) """
         q = query.lower()
-        if not any(k in q for k in ["行事曆", "幾號", "日期", "活動", "什麼時候"]):
-            return None
-
-        matched_events = []
-        # 判斷月份
-        month_match = re.search(r'(\d+)月', q)
-        if month_match:
-            m = month_match.group(1).zfill(2)
-            matched_events = [e for e in self.calendar_data if f"/{m}/" in e['date']]
-        else:
-            # 預設抓取最近 5 筆
-            matched_events = self.calendar_data[:5]
-
-        if matched_events:
-            header = f"◤  內湖高工 學習里程碑  ◢\n━━━━━━━━━━━━━━\n\n"
-            body = ""
-            for ev in matched_events:
-                # 去除行政術語 (如: 召開XX會議、彙報等)，聚焦學生權益
-                event_name = ev['event']
-                if any(x in event_name for x in ["會議", "彙報", "處室", "撰寫"]): 
-                    continue
-                
-                # 簡化日期
-                d = ev['date'].split('/')
-                short_date = f"{d[1]}.{d[2]}"
-                body += f"◈  {short_date}\n   {event_name}\n\n"
-            
-            if not body: return None
-            
-            footer = "━━━━━━━━━━━━━━\n  家長重要日程提醒"
-            return header + body + footer
+        if any(k in q for k in ["電話", "分機", "地址", "交通", "怎麼去"]):
+            res = "◤  校園通訊與交通  ◢\n━━━━━━━━━━━━━━\n\n"
+            if any(k in q for k in ["地址", "交通"]):
+                t = self.faq_data.get("traffic", {})
+                res += f"◈  學校地址\n   {t.get('address')}\n\n◈  交通引導\n   {t.get('mrt')}\n\n"
+            else:
+                contacts = self.faq_data.get("contacts", [])
+                found = [c for c in contacts if any(k in c['title'] for k in [q.replace("電話","")])]
+                target = found[:4] if found else contacts[:4]
+                for c in target:
+                    res += f"◈  {c['title']} {c['name']}\n   {c['phone']}\n\n"
+            res += "━━━━━━━━━━━━━━\n  Keynote 簡約模式"
+            return res
         return None
 
     def ask_ai(self, user_query):
-        # 1. 優先攔截行事曆 (數據驅動邏輯)
-        calendar_res = self.check_calendar_logic(user_query)
-        if calendar_res: return calendar_res
+        # 1. 優先處理基礎 FAQ (不需複雜 RAG)
+        static_faq = self.check_static_faq(user_query)
+        if static_faq: return static_faq
 
-        # 2. 檢索相關公告 (Top 3)
-        relevant_context = ""
-        # 簡易關鍵字匹配 (RAG)
-        found = [i for i in self.knowledge_data if user_query[:4] in i.get('title', '') or user_query[:4] in i.get('content', '')]
-        for i, row in enumerate(found[:3]):
-            relevant_context += f"標題:{row['title']}\n網址:{row['url']}\n內容:{row['content'][:300]}\n---\n"
+        # 2. 檢索相關公告與行事曆 (RAG)
+        # 尋找最相關的一筆資料作為主來源
+        relevant_items = [i for i in self.knowledge_data if user_query[:3] in i.get('title', '') or user_query[:3] in i.get('content', '')]
+        
+        source_url = ""
+        context_text = ""
+        
+        if relevant_items:
+            # 取第一筆作為主要來源 URL
+            source_url = relevant_items[0].get('url', '')
+            for i, row in enumerate(relevant_items[:3]):
+                context_text += f"來源{i+1}: {row['title']}\n內容: {row['content'][:300]}\n\n"
 
-        # 3. 呼叫 Gemini 並設定排版準則
+        # 3. 呼叫 Gemini 生成回覆
         prompt = f"""
-        你是一位極簡專業的內湖高工校園小幫手。
+        你是一位內湖高工校園助手。請以 Apple Keynote 風格回答。
 
-        【回答準則】：
-        1. 格式：Apple Keynote 風格 (標題用 ◤ ◢，內容用 ◈，段落空一行)。
-        2. 利益導向：剔除複雜行政代號，請告訴家長這件事對「學生」的影響。
-        3. URL：資料中的 URL 僅呈現一次，請放在最後並標註「👉 查看原文」。
-        4. 符號：適當使用優雅的 Emoji (如 📅, 🏫, 💡)。
-        5. 數據驅動：若有日期、地點、電話，請精確列出。
+        【視覺與邏輯規範】：
+        1. 使用 ◤ ◢ 包裹標題，使用 ◈ 作為項目符號。
+        2. 段落與項目之間必須空一行，保持視覺寬鬆感。
+        3. 內容聚焦於「家長與學生利益」，剔除冗長的行政術語。
+        4. 適度加入 Emoji (📅, 🏫, 💡)。
+        5. **嚴格禁止在文中反覆呈現 URL**。
 
-        【資料庫內容】：
-        {relevant_context}
+        【校園資料庫】：
+        {context_text if context_text else "無相關公告資料"}
 
         【家長問題】：
         {user_query}
@@ -120,16 +108,21 @@ class SmartBrain:
         try:
             model = genai.GenerativeModel(MODEL_NAME)
             response = model.generate_content(prompt)
-            return response.text
-        except:
-            return "◤  系統忙碌中  ◢\n\n◈  請稍後再試\n\n  NIHS Bot"
+            final_text = response.text
 
-# 初始化
-brain = SmartBrain()
+            # 4. 根據您的要求：在最後提供來源資料網址
+            if source_url:
+                final_text += f"\n\n🔗 來源參考資料：\n{source_url}"
+            
+            return final_text
+        except:
+            return "◤  系統提醒  ◢\n━━━━━━━━━━━━━━\n\n◈  資料檢索忙碌中\n   請稍後再試\n\n  NIHS AI"
 
 # ==========================================
 # 🌐 路由區
 # ==========================================
+brain = SmartBrain()
+
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
