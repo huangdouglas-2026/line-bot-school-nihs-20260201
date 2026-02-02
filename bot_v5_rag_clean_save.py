@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import google.generativeai as genai
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
@@ -25,104 +24,98 @@ app = Flask(__name__)
 
 # 檔案路徑
 DATA_FILE = 'nihs_knowledge_full.json'
-FAQ_FILE = 'nihs_faq.json'
-CALENDAR_FILE = 'nihs_calendar.json'
 
 # ==========================================
-# 🧠 AI 大腦 (Keynote Style + 來源精準標註)
+# 🧠 AI 大腦 (美式積極服務模式)
 # ==========================================
-class SmartBrain:
+class FullContextBrain:
     def __init__(self):
-        self.load_all_data()
-
-    def load_all_data(self):
+        self.ready = False
         self.knowledge_data = []
+        self.load_data()
+
+    def load_data(self):
         if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                self.knowledge_data = json.load(f)
+            try:
+                with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                    self.knowledge_data = json.load(f)
+                self.ready = True
+            except: self.ready = False
+
+    def search(self, query, top_k=3):
+        # 簡單的檢索過濾 (未來可根據您的需求改為更複雜的搜尋)
+        results = [i for i in self.knowledge_data if query[:3] in str(i.values())]
+        return results[:top_k]
+
+    def ask(self, user_msg):
+        if not self.ready:
+            return "系統維護中：暫時無法存取資料庫，請稍後再試。"
+
+        found_data = self.search(user_msg, top_k=3)
         
-        self.faq_data = {}
-        if os.path.exists(FAQ_FILE):
-            with open(FAQ_FILE, 'r', encoding='utf-8') as f:
-                self.faq_data = json.load(f)
-
-        self.calendar_data = []
-        if os.path.exists(CALENDAR_FILE):
-            with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
-                self.calendar_data = json.load(f)
-
-    def check_static_faq(self, query):
-        """ 處理基礎通訊與交通 (此類不強烈要求外部來源網址) """
-        q = query.lower()
-        if any(k in q for k in ["電話", "分機", "地址", "交通", "怎麼去"]):
-            res = "◤  校園通訊與交通  ◢\n━━━━━━━━━━━━━━\n\n"
-            if any(k in q for k in ["地址", "交通"]):
-                t = self.faq_data.get("traffic", {})
-                res += f"◈  學校地址\n   {t.get('address')}\n\n◈  交通引導\n   {t.get('mrt')}\n\n"
-            else:
-                contacts = self.faq_data.get("contacts", [])
-                found = [c for c in contacts if any(k in c['title'] for k in [q.replace("電話","")])]
-                target = found[:4] if found else contacts[:4]
-                for c in target:
-                    res += f"◈  {c['title']} {c['name']}\n   {c['phone']}\n\n"
-            res += "━━━━━━━━━━━━━━\n  Keynote 簡約模式"
-            return res
-        return None
-
-    def ask_ai(self, user_query):
-        # 1. 優先處理基礎 FAQ (不需複雜 RAG)
-        static_faq = self.check_static_faq(user_query)
-        if static_faq: return static_faq
-
-        # 2. 檢索相關公告與行事曆 (RAG)
-        # 尋找最相關的一筆資料作為主來源
-        relevant_items = [i for i in self.knowledge_data if user_query[:3] in i.get('title', '') or user_query[:3] in i.get('content', '')]
-        
-        source_url = ""
         context_text = ""
+        source_url = ""
         
-        if relevant_items:
-            # 取第一筆作為主要來源 URL
-            source_url = relevant_items[0].get('url', '')
-            for i, row in enumerate(relevant_items[:3]):
-                context_text += f"來源{i+1}: {row['title']}\n內容: {row['content'][:300]}\n\n"
+        for i, row in enumerate(found_data):
+            # 獲取主來源網址 (取第一筆)
+            if i == 0: source_url = row.get('url', '')
+            
+            # 處理附件
+            attachments = row.get('attachments', [])
+            attach_str = ", ".join([f"[{a.get('name')}]" for a in attachments if isinstance(a, dict)]) if attachments else ""
 
-        # 3. 呼叫 Gemini 生成回覆
+            context_text += f"""
+【資料來源 {i+1}】
+標題：{row.get('title')}
+網址：{row.get('url')}
+附件：{attach_str}
+內容摘要：{str(row.get('content'))[:400]}...
+--------------------------------
+"""
+
+        # 🤖 更新後的 Prompt：加入美式服務風格指令
         prompt = f"""
-        你是一位內湖高工校園助手。請以 Apple Keynote 風格回答。
+你是一個親切且積極的內湖高工校園小幫手。
+請根據下方的【檢索資料】回答家長的【問題】。
 
-        【視覺與邏輯規範】：
-        1. 使用 ◤ ◢ 包裹標題，使用 ◈ 作為項目符號。
-        2. 段落與項目之間必須空一行，保持視覺寬鬆感。
-        3. 內容聚焦於「家長與學生利益」，剔除冗長的行政術語。
-        4. 適度加入 Emoji (📅, 🏫, 💡)。
-        5. **嚴格禁止在文中反覆呈現 URL**。
+【回答準則】：
+1. 語氣：親切、專業、充滿熱情（繁體中文）。
+2. **美式服務風格（針對查無資料時）**：
+   如果資料中找不到答案，請使用以下風格回覆：
+   「您的問題很好！目前公告中暫時找不到相關資訊。建議家長您可以先直接聯繫學校詢問。同時，我們也會將您的問題記錄下來，並儘快更新在資料庫中，讓其他家長未來也可以參考。謝謝您幫助我們變得更好！」
+3. **資訊對等**：
+   - 如果有答案，請清晰條列，並適度使用 Emoji。
+   - 務必提到資料中出現的「網址」或「附件」下載提醒。
+4. **來源標註**：
+   - 不要在文中反覆貼網址，請在回答結束後統一標註。
 
-        【校園資料庫】：
-        {context_text if context_text else "無相關公告資料"}
+【檢索資料】：
+{context_text if context_text else "EMPTY_DATABASE"}
 
-        【家長問題】：
-        {user_query}
-        """
+【家長問題】：
+{user_msg}
 
+【你的回答】：
+"""
         try:
             model = genai.GenerativeModel(MODEL_NAME)
             response = model.generate_content(prompt)
-            final_text = response.text
-
-            # 4. 根據您的要求：在最後提供來源資料網址
-            if source_url:
-                final_text += f"\n\n🔗 來源參考資料：\n{source_url}"
+            reply = response.text
             
-            return final_text
+            # 只有在有資料且回答中沒包含 URL 時，才在最後補上來源
+            if source_url and source_url not in reply:
+                reply += f"\n\n🔗 來源資料參考：\n{source_url}"
+                
+            return reply
         except:
-            return "◤  系統提醒  ◢\n━━━━━━━━━━━━━━\n\n◈  資料檢索忙碌中\n   請稍後再試\n\n  NIHS AI"
+            return "您的問題很好！不過小幫手現在連線有點忙碌，可以請您稍後再試一次嗎？感謝您的耐心！"
+
+# 初始化
+brain = FullContextBrain()
 
 # ==========================================
 # 🌐 路由區
 # ==========================================
-brain = SmartBrain()
-
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -136,7 +129,7 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_msg = event.message.text.strip()
-    reply = brain.ask_ai(user_msg)
+    reply = brain.ask(user_msg)
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 if __name__ == "__main__":
