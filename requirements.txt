@@ -6,3 +6,5 @@ google-genai
 pdfplumber
 requests
 numpy
+faiss-cpu
+sentence-transformers
