@@ -3,8 +3,5 @@ line-bot-sdk
 gunicorn
 google-generativeai
 google-genai
-pdfplumber
 requests
-numpy<2.0.0
-faiss-cpu==1.7.4
-sentence-transformers==2.2.2
+numpy
