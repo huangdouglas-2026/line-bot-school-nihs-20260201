@@ -2,14 +2,14 @@ name: 每日校園資料更新 (Daily Crawl)
 
 # 設定觸發時機
 on:
-  # 1. 自動排程：台灣時間凌晨 03:00
+  # 1. 自動排程：台灣時間凌晨 03:00 (19:00 UTC)
   schedule:
     - cron: '0 19 * * *'
   
   # 2. 手動觸發
   workflow_dispatch:
 
-# ⚠️ 關鍵權限：賦予寫入權限
+# ⚠️ 重要：賦予寫入權限，這對 push 動作至關重要
 permissions:
   contents: write
 
@@ -21,7 +21,7 @@ jobs:
     - name: 檢出儲存庫 (Checkout)
       uses: actions/checkout@v4
       with:
-        # ⚠️ 關鍵：抓取完整 Git 歷史紀錄以確保 Rebase 成功
+        # 抓取完整 Git 歷史紀錄以確保 Rebase 成功
         fetch-depth: 0
 
     - name: 設定 Python 環境
@@ -32,7 +32,8 @@ jobs:
     - name: 安裝必要套件 (Dependencies)
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 pandas lxml playwright nest_asyncio google-genai pdfplumber
+        # 修正處：確保安裝 google-generativeai 以解決 ModuleNotFoundError
+        pip install requests beautifulsoup4 pandas lxml playwright nest_asyncio google-genai google-generativeai pdfplumber
         playwright install chromium
 
     - name: 執行爬蟲與資料處理
@@ -40,12 +41,13 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
         echo "🕷️ [1/5] 執行靜態爬蟲..."
-        python static_crawler_v43_recursive.py || echo "⚠️ 靜態爬蟲發生錯誤，繼續執行..."
+        python static_crawler_v43_recursive.py || echo "⚠️ 靜態爬蟲發生異常，繼續執行..."
         
         echo "🕷️ [2/5] 執行動態公告爬蟲..."
-        python ultimate_bot_builder_v40_printHere.py || echo "⚠️ 動態爬蟲發生錯誤，繼續執行..."
+        python ultimate_bot_builder_v40_printHere.py || echo "⚠️ 動態爬蟲發生異常，繼續執行..."
         
-        echo "🧠 [3/5] 生成 FAQ 題庫..."
+        echo "🧠 [3/5] 生成 FAQ 題庫 (使用 Gemini)..."
+        # 此步驟若出錯通常是 API Key 或套件問題
         python generate_faq.py || echo "⚠️ FAQ 生成失敗..."
         
         echo "📅 [4/5] 解析行事曆 PDF..."
@@ -55,36 +57,35 @@ jobs:
         python merge_data.py || echo "⚠️ 資料整合失敗..."
 
     # ---------------------------------------------------
-    # 修正後的提交與推送邏輯 (整合 Rebase 策略)
+    # 強效抗衝突提交與推送 (Robust Sync)
     # ---------------------------------------------------
     - name: 提交並推送變更 (解決 Push Rejected)
       run: |
         git config --global user.name "GitHub Action Bot"
         git config --global user.email "actions@github.com"
         
-        # 預先宣告拉取策略為 rebase，避免互動提示
+        # 1. 宣告拉取策略為 rebase，避免互動提示導致卡死
         git config pull.rebase true
         
-        # 1. 將所有產出的 JSON 檔案加入 Git 暫存區
+        # 2. 將產出的所有 JSON 檔案加入 Git 暫存區
         git add nihs_knowledge_full.json nihs_faq.json nihs_calendar.json nihs_static_data_v43.json || true
         
         timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
         
-        # 2. 只有在有變動時才執行 Commit
+        # 3. 只有在有變動時才執行 Commit
         if git commit -m "Auto-update data: ${timestamp}"; then
-          echo "✅ 資料有變動，準備同步並推送..."
+          echo "✅ 有新資料，執行同步流程..."
           
-          # 3. 關鍵修正：先拉取遠端最新變更 (處理手動修改程式碼造成的衝突)
-          # 使用 --no-edit 避免跳出編輯訊息視窗
+          # 4. 🔥 解決衝突關鍵：先拉取遠端最新變更 (處理手動修改程式碼造成的衝突)
           git pull origin main --no-edit
           
-          # 4. 執行推送
+          # 5. 推送
           if git push origin main; then
             echo "🚀 資料庫已成功同步至 GitHub！"
           else
-            echo "❌ 推送仍然失敗，可能存在人工無法自動合併的衝突。"
+            echo "❌ 推送仍然失敗，請檢查 GitHub 權限或檔案衝突。"
             exit 1
           fi
         else
-          echo "⚠️ 資料內容無變動，跳過同步程序。"
+          echo "⚠️ 資料內容無變更，跳過推送。"
         fi
