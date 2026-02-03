@@ -1,0 +1,41 @@
+name: ⚡ 測試：僅執行語意增強 (Enrich Only)
+
+on:
+  workflow_dispatch: # 純手動觸發
+
+permissions:
+  contents: write
+
+jobs:
+  test-enrich:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Python Setup
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install
+        run: pip install google-genai google-generativeai
+        
+      - name: Run Enrich
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          echo "🧪 開始測試 AI 標籤生成..."
+          python enrich_data.py
+          
+      - name: Commit Result
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
+          git add nihs_knowledge_full.json
+          if git commit -m "Test: AI Data Enrichment"; then
+            git push
+            echo "✅ 測試成功，資料已更新！"
+          else
+            echo "⚠️ 沒有資料被修改 (可能是所有資料都有標籤了)"
+          fi
