@@ -45,7 +45,11 @@ jobs:
         
         echo "🕷️ [2/5] 執行動態公告爬蟲..."
         python ultimate_bot_builder_v40_printHere.py || echo "⚠️ 動態爬蟲發生異常，繼續執行..."
-        
+
+      # 🔥【新增步驟】在這裡執行資料加料 (Data Enrichment)
+        echo "✨ [2.5/5] 執行 AI 語意增強 (Data Enrichment)..."
+        python enrich_data.py || echo "⚠️ 語意增強失敗，但保留原始資料繼續..."
+
         echo "🧠 [3/5] 生成 FAQ 題庫 (使用 Gemini)..."
         # 此步驟若出錯通常是 API Key 或套件問題
         python generate_faq.py || echo "⚠️ FAQ 生成失敗..."
