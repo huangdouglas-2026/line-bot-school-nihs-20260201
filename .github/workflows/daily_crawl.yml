@@ -26,7 +26,7 @@ jobs:
     - name: 檢出儲存庫 (Checkout)
       uses: actions/checkout@v4
       with:
-        # ⚠️ 關鍵：抓取完整 Git 歷史紀錄，確保 Rebase 不會因為找不到祖先而失敗
+        # ⚠️ 關鍵：抓取完整 Git 歷史紀錄，確保 Rebase 運作正常
         fetch-depth: 0
 
     - name: 設定 Python 環境
@@ -37,45 +37,54 @@ jobs:
     - name: 安裝必要套件 (Dependencies)
       run: |
         python -m pip install --upgrade pip
-        # ⚠️ 修正：同時安裝 google-genai 與 google-generativeai 以支援不同版本的腳本
+        # ⚠️ 修正：同時安裝 google-genai 與 google-generativeai
         pip install requests beautifulsoup4 pandas lxml playwright nest_asyncio google-genai google-generativeai pdfplumber
         playwright install chromium
 
     # ---------------------------------------------------
-    # 2. 執行爬蟲與 AI 處理 (核心流程)
+    # 2. 執行爬蟲與資料處理 (邏輯優化版)
     # ---------------------------------------------------
-    - name: 執行爬蟲、語意增強與資料處理
+    - name: 執行爬蟲、整合與 AI 增強
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
-        # 1. 靜態網頁爬蟲
-        echo "🕷️ [1/6] 執行靜態爬蟲 (Static Crawler)..."
-        python static_crawler_v43_recursive.py || echo "⚠️ 靜態爬蟲發生異常，跳過並繼續..."
+        # --- 步驟 A: 靜態爬蟲 (每週一次策略) ---
+        # 取得今天是星期幾 (0=週日)
+        DAY_OF_WEEK=$(date +%w)
         
-        # 2. 動態公告爬蟲
-        echo "🕷️ [2/6] 執行動態公告爬蟲 (Dynamic Crawler)..."
-        python ultimate_bot_builder_v40_printHere.py || echo "⚠️ 動態爬蟲發生異常，跳過並繼續..."
+        # 邏輯：如果是週日(0) 或者 是手動觸發(workflow_dispatch)，才跑靜態爬蟲
+        if [ "$DAY_OF_WEEK" -eq "0" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "📅 今天是週日 (或手動觸發)，執行全量靜態爬蟲..."
+          python static_crawler_v43_recursive.py || echo "⚠️ 靜態爬蟲異常，將使用舊檔..."
+        else
+          echo "💤 今天不是週日，跳過靜態爬蟲 (使用 Repository 中現存的舊檔)，節省資源。"
+        fi
         
-        # 🔥 3. 新增步驟：AI 語意增強 (Data Enrichment)
-        # 這一步會讀取爬下來的 JSON，並加上 tags 與 summary
-        echo "✨ [3/6] 執行 AI 語意增強 (Enrich Data)..."
+        # --- 步驟 B: 動態公告爬蟲 (每日必跑) ---
+        echo "🕷️ [2/6] 執行動態公告爬蟲..."
+        python ultimate_bot_builder_v40_printHere.py || echo "⚠️ 動態爬蟲異常..."
+        
+        # --- 步驟 C: 附屬資料生成 ---
+        echo "🧠 [3/6] 生成 FAQ 題庫..."
+        python generate_faq.py || echo "⚠️ FAQ 生成失敗..."
+        
+        echo "📅 [4/6] 解析行事曆 PDF..."
+        python generate_calendar.py || echo "⚠️ 行事曆解析失敗..."
+        
+        # --- 步驟 D: 資料整合 (Merge) ---
+        # ⚠️ 注意：這裡必須搭配新的「智慧合併 (Smart Merge)」腳本，才不會把舊標籤洗掉
+        echo "🔄 [5/6] 整合全知資料庫 (Merge Data)..."
+        python merge_data.py || echo "⚠️ 資料整合失敗..."
+
+        # --- 步驟 E: AI 語意增強 (Enrich) ---
+        # ⚠️ 關鍵順序：必須在 Merge 產生完整的 nihs_knowledge_full.json 之後執行
+        # 這樣它才能幫新進來的資料加上 tags
+        echo "✨ [6/6] 執行 AI 語意增強 (Enrich Data)..."
         if [ -f "enrich_data.py" ]; then
-          python enrich_data.py || echo "⚠️ 語意增強失敗，將使用原始資料繼續..."
+          python enrich_data.py || echo "⚠️ 語意增強失敗，但保留原始資料。"
         else
           echo "⚠️ 找不到 enrich_data.py，跳過此步驟。"
         fi
-        
-        # 4. 生成 FAQ
-        echo "🧠 [4/6] 生成 FAQ 題庫 (Generate FAQ)..."
-        python generate_faq.py || echo "⚠️ FAQ 生成失敗..."
-        
-        # 5. 解析行事曆 PDF
-        echo "📅 [5/6] 解析行事曆 PDF (Calendar Parsing)..."
-        python generate_calendar.py || echo "⚠️ 行事曆解析失敗..."
-        
-        # 6. 資料整合
-        echo "🔄 [6/6] 整合全知資料庫 (Merge Data)..."
-        python merge_data.py || echo "⚠️ 資料整合失敗..."
 
     # ---------------------------------------------------
     # 3. 提交與同步 (強效抗衝突版)
@@ -85,32 +94,30 @@ jobs:
         git config --global user.name "GitHub Action Bot"
         git config --global user.email "actions@github.com"
         
-        # ⚠️ 預先宣告拉取策略為 rebase，避免 Git 跳出互動式詢問卡死流程
+        # 預先宣告拉取策略為 rebase
         git config pull.rebase true
         
-        # 1. 將產出的所有關鍵 JSON 檔案加入 Git 暫存區
-        # 包含：靜態資料、完整公告、FAQ、行事曆
+        # 1. 加入所有關鍵檔案 (即使靜態檔案沒變，git add 也不會報錯)
         git add nihs_static_data_v43.json nihs_knowledge_full.json nihs_faq.json nihs_calendar.json || true
         
         timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
         
-        # 2. 檢查是否有變更並提交
+        # 2. 檢查變更並提交
         if git commit -m "Auto-update data: ${timestamp}"; then
           echo "✅ 資料有變動，準備同步..."
           
-          # 3. 🔥 抗衝突關鍵：先拉取遠端最新程式碼，將 JSON 變更「疊加」在最新版之上
-          # --no-edit 確保不會跳出編輯器
-          echo "🔄 正在執行 git pull --rebase..."
+          # 3. 先拉取遠端最新變更 (Rebase)
+          echo "🔄 執行 git pull --rebase..."
           git pull origin main --no-edit
           
           # 4. 推送
-          echo "🚀 正在推送至 GitHub..."
+          echo "🚀 執行 git push..."
           if git push origin main; then
-            echo "✅ 資料庫已成功同步！"
+            echo "✅ 資料庫已成功同步至 GitHub！"
           else
-            echo "❌ 推送失敗，可能存在無法自動解決的衝突，請檢查 Log。"
+            echo "❌ 推送失敗，請檢查 GitHub Action Logs。"
             exit 1
           fi
         else
-          echo "⚠️ 資料內容無變更，跳過推送步驟。"
+          echo "⚠️ 資料內容無變更 (可能是週末或無新公告)，跳過推送。"
         fi
