@@ -68,8 +68,8 @@
         {
             "category": "處室",
             "title": "總務處事務組長",
-            "name": "null",
-            "phone": "26574874#121"
+            "name": "陳主任",
+            "phone": "02-26574874#121"
         },
         {
             "category": "人事室",
@@ -82,6 +82,18 @@
             "title": "null",
             "name": "null",
             "phone": "265748745轉203"
+        },
+        {
+            "category": "教務處註冊組",
+            "title": "null",
+            "name": "null",
+            "phone": "02-26574874分機310或317"
+        },
+        {
+            "category": "學務處",
+            "title": "主任",
+            "name": "郭主任",
+            "phone": "02-26574874轉201"
         }
     ]
 }
