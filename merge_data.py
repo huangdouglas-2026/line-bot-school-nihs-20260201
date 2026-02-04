@@ -1,85 +1,89 @@
 import json
 import os
-from datetime import datetime
+import datetime
 
-# 📂 設定檔案路徑
-FILE_ANNOUNCEMENT = "nihs_final_v40.json"       # 1. 公告資料 (List)
-FILE_STATIC       = "nihs_static_data_v43.json" # 2. 靜態資料 (List)
-FILE_FAQ          = "nihs_faq.json"             # 3. AI 提煉題庫 (Dict)
-FILE_CALENDAR     = "nihs_calendar.json"        # 4. AI 提煉行事曆 (List)
+# 定義檔案路徑
+FILES = {
+    'static': 'nihs_static_data_v43.json',
+    'dynamic': 'nihs_final_v40.json', # 這是動態爬蟲剛抓下來的"當日增量"
+    'calendar': 'nihs_calendar.json',
+    'faq': 'nihs_faq.json',
+    'master': 'nihs_knowledge_full.json' # 這是我們的主資料庫 (含 AI 標籤)
+}
 
-OUTPUT_FILE = "nihs_knowledge_full.json"        # 合併後的總檔案
+def load_json(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return [] # 若檔案不存在回傳空陣列
 
-def merge():
-    print("🔄 開始執行資料大整合...")
-    full_data = []
+def merge_data():
+    print("🔄 啟動智慧合併 (Smart Merge)...")
 
-    # --- 1. 處理公告資料 (List) ---
-    if os.path.exists(FILE_ANNOUNCEMENT):
-        with open(FILE_ANNOUNCEMENT, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            full_data.extend(data)
-        print(f"   📖 [公告資料] 載入完成: {len(data)} 筆")
+    # 1. 讀取主資料庫 (Master DB) - 這是我們的「資產」，裡面有珍貴的 AI 標籤
+    master_data = load_json(FILES['master'])
+    print(f"   📖 主資料庫現有: {len(master_data)} 筆")
 
-    # --- 2. 處理靜態資料 (List) ---
-    if os.path.exists(FILE_STATIC):
-        with open(FILE_STATIC, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            full_data.extend(data)
-        print(f"   📖 [靜態資料] 載入完成: {len(data)} 筆")
+    # 建立一個用 URL 或 Title 當 Key 的字典，方便快速比對
+    # 邏輯：key = url (若無 url 則用 title)
+    master_map = {item.get('url', item.get('title')): item for item in master_data}
 
-    # --- 3. 處理行事曆 (List) ---
-    # 行事曆也是清單格式，直接併入以利 AI 檢索
-    if os.path.exists(FILE_CALENDAR):
-        with open(FILE_CALENDAR, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            # 將行事曆格式標準化為知識條目，方便 AI 搜尋
-            calendar_items = []
-            for ev in data:
-                calendar_items.append({
-                    "category": "學期行事曆",
-                    "unit": ev.get("category", "校務"),
-                    "date": ev.get("date"),
-                    "title": f"行事曆活動: {ev.get('event')}",
-                    "content": f"日期: {ev.get('date')}\n活動名稱: {ev.get('event')}\n類別: {ev.get('category')}",
-                    "url": "https://www.nihs.tp.edu.tw/nss/p/index"
-                })
-            full_data.extend(calendar_items)
-        print(f"   📖 [行事曆] 載入完成: {len(calendar_items)} 筆活動")
+    # 2. 讀取新資料 (New Inputs)
+    new_data_sources = [
+        load_json(FILES['static']),
+        load_json(FILES['dynamic']),
+        load_json(FILES['calendar'])
+        # FAQ 結構不同，通常不直接 merge 進 list，而是獨立讀取，這裡視您的架構而定
+        # 如果您的 bot 是分開讀 FAQ 的，這裡就不用 merge FAQ
+    ]
 
-    # --- 4. 處理 FAQ 題庫 (Dict) ---
-    # FAQ 是字典格式，我們將其轉化為一條大型知識條目
-    if os.path.exists(FILE_FAQ):
-        with open(FILE_FAQ, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+    updates_count = 0
+    new_entry_count = 0
+
+    for source in new_data_sources:
+        if not isinstance(source, list): continue # 防呆
+
+        for new_item in source:
+            key = new_item.get('url', new_item.get('title'))
             
-            # 轉換為可檢索的文字格式
-            traffic = data.get("traffic", {})
-            contacts = data.get("contacts", [])
-            
-            faq_content = "【交通資訊】\n"
-            faq_content += f"地址：{traffic.get('address')}\n捷運：{traffic.get('mrt')}\n公公車：{traffic.get('bus')}\n\n"
-            faq_content += "【常用聯絡電話/分機】\n"
-            for c in contacts:
-                faq_content += f"{c.get('title')} {c.get('name')}: {c.get('phone')}\n"
+            if key in master_map:
+                # 狀況 A：資料已存在 -> 更新內容，但保留 AI 標籤
+                existing_item = master_map[key]
+                
+                # 保留珍貴的 AI 欄位 (tags, summary, content_enriched)
+                if 'tags' in existing_item: new_item['tags'] = existing_item['tags']
+                if 'summary' in existing_item: new_item['summary'] = existing_item['summary']
+                if 'content_enriched' in existing_item: 
+                    # 這裡有個策略：如果原文變了，enriched 其實要重做。
+                    # 但通常公告不會改原文。我們先假設保留。
+                    new_item['content_enriched'] = existing_item['content_enriched']
+                
+                # 更新 master_map (這樣新的內容會蓋過舊的，但標籤被我們上面那幾行救回來了)
+                master_map[key] = new_item
+                updates_count += 1
+            else:
+                # 狀況 B：新資料 -> 直接加入
+                master_map[key] = new_item
+                new_entry_count += 1
 
-            full_data.append({
-                "category": "常見問題題庫",
-                "unit": "秘書室/總務處",
-                "date": datetime.now().strftime("%Y/%m/%d"),
-                "title": "內湖高工常見問題 (交通、地址、各處室電話分機)",
-                "content": faq_content,
-                "url": "https://www.nihs.tp.edu.tw/nss/p/index"
-            })
-        print(f"   📖 [FAQ 題庫] 載入並結構化完成")
-
-    # --- 總結與存檔 ---
-    print(f"   📊 總計整合資料: {len(full_data)} 筆")
-
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-        json.dump(full_data, f, ensure_ascii=False, indent=4)
+    # 3. 轉回 List 並存檔
+    final_list = list(master_map.values())
     
-    print(f"✅ 合併完成！全知資料庫已更新: {OUTPUT_FILE}")
+    # 根據日期排序 (新的在上面)
+    # 嘗試解析日期，若無日期則排在最後
+    def sort_key(x):
+        d = x.get('date', '1900/01/01')
+        return d if d else '1900/01/01'
+
+    final_list.sort(key=sort_key, reverse=True)
+
+    with open(FILES['master'], 'w', encoding='utf-8') as f:
+        json.dump(final_list, f, ensure_ascii=False, indent=4)
+
+    print(f"✅ 合併完成！")
+    print(f"   ➕ 新增資料: {new_entry_count} 筆")
+    print(f"   🔄 更新資料: {updates_count} 筆 (保留 AI 標籤)")
+    print(f"   📊 目前總數: {len(final_list)} 筆")
 
 if __name__ == "__main__":
-    merge()
+    merge_data()
