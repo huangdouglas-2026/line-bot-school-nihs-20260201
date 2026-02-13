@@ -26,7 +26,7 @@
         {
             "category": "校長室",
             "title": "秘書",
-            "name": "吳",
+            "name": "吳秘書",
             "phone": "26574874轉302"
         },
         {
@@ -72,441 +72,441 @@
             "phone": "26574874轉301"
         },
         {
-            "category": "學務處",
-            "title": "主任",
-            "name": "郭",
-            "phone": "26574874轉201"
-        },
-        {
-            "category": "訓育組",
-            "title": "組長",
-            "name": "卓",
-            "phone": "26574874轉202"
-        },
-        {
-            "category": "訓育組",
-            "title": "幹事",
-            "name": "曾",
-            "phone": "26574874轉207"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "組長",
-            "name": "簡",
-            "phone": "26574874轉203"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘管理員",
-            "name": "蔡",
-            "phone": "26574874轉206"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘學務",
-            "name": "林",
-            "phone": "26574874轉217"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘學務",
-            "name": "廖",
-            "phone": "26574874轉210"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘學務",
-            "name": "林",
-            "phone": "26574874轉 212"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘學務",
-            "name": "陳",
-            "phone": "26574874轉 213"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘學務",
-            "name": "婁",
-            "phone": "26574874轉211"
-        },
-        {
-            "category": "學生輔導組",
-            "title": "約聘學務",
-            "name": "林",
-            "phone": "26574874轉209"
-        },
-        {
-            "category": "教官室",
-            "title": "教官",
-            "name": "郭",
-            "phone": "26574874轉219"
-        },
-        {
-            "category": "教官室",
-            "title": "教官",
-            "name": "逄",
-            "phone": "26574874轉218"
-        },
-        {
-            "category": "衛生保健組",
-            "title": "組長",
-            "name": "鄭",
-            "phone": "26574874轉204"
-        },
-        {
-            "category": "衛生保健組",
-            "title": "幹事",
-            "name": "謝",
-            "phone": "26574874轉208"
-        },
-        {
-            "category": "體育活動組",
-            "title": "組長",
-            "name": "邱",
-            "phone": "26574874轉205"
-        },
-        {
-            "category": "體育活動組",
-            "title": "幹事",
-            "name": "蔡",
-            "phone": "26574874轉186"
-        },
-        {
-            "category": "體育活動組",
-            "title": "專任運動教練",
-            "name": "李",
-            "phone": "26574874轉186"
-        },
-        {
-            "category": "健康中心",
-            "title": "護理師",
-            "name": "林",
-            "phone": "26574874轉151"
-        },
-        {
-            "category": "健康中心",
-            "title": "護理師",
-            "name": "高",
-            "phone": "26574874轉152"
-        },
-        {
             "category": "教務處",
             "title": "主任",
-            "name": "徐",
+            "name": "徐主任",
             "phone": "26574874轉311"
         },
         {
-            "category": "教學組",
+            "category": "教務處",
             "title": "組長",
-            "name": "賴",
+            "name": "賴組長",
             "phone": "26574874轉312"
         },
         {
-            "category": "教學組",
+            "category": "教務處",
             "title": "幹事",
-            "name": "劉",
+            "name": "劉幹事",
             "phone": "26574874轉318"
         },
         {
-            "category": "註冊組",
+            "category": "教務處",
             "title": "組長",
-            "name": "溫",
+            "name": "溫組長",
             "phone": "26574874轉313"
         },
         {
-            "category": "註冊組",
+            "category": "教務處",
             "title": "幹事",
-            "name": "廖",
+            "name": "廖幹事",
             "phone": "26574874轉310"
         },
         {
-            "category": "註冊組",
+            "category": "教務處",
             "title": "書記",
-            "name": "彭",
+            "name": "彭書記",
             "phone": "26574874轉317"
         },
         {
-            "category": "設備組",
+            "category": "教務處",
             "title": "組長",
-            "name": "江",
+            "name": "江組長",
             "phone": "26574874轉315"
         },
         {
-            "category": "設備組",
+            "category": "教務處",
             "title": "技士",
-            "name": "柯",
+            "name": "柯技士",
             "phone": "26574874轉316"
         },
         {
-            "category": "實驗研究組",
+            "category": "教務處",
             "title": "組長",
-            "name": "張",
+            "name": "張組長",
             "phone": "26574874轉335"
         },
         {
-            "category": "實驗研究組",
+            "category": "教務處",
             "title": "幹事",
-            "name": "王",
+            "name": "王幹事",
             "phone": "26574874轉333"
         },
         {
-            "category": "特殊教育組",
+            "category": "教務處",
             "title": "組長",
-            "name": "鄭",
+            "name": "鄭組長",
             "phone": "26574874轉114"
         },
         {
-            "category": "特殊教育組",
+            "category": "教務處",
             "title": "幹事",
-            "name": "吳",
+            "name": "吳幹事",
             "phone": "26574874轉119"
+        },
+        {
+            "category": "學務處",
+            "title": "主任",
+            "name": "郭主任",
+            "phone": "26574874轉201"
+        },
+        {
+            "category": "學務處",
+            "title": "組長",
+            "name": "卓組長",
+            "phone": "26574874轉202"
+        },
+        {
+            "category": "學務處",
+            "title": "幹事",
+            "name": "曾幹事",
+            "phone": "26574874轉207"
+        },
+        {
+            "category": "學務處",
+            "title": "組長",
+            "name": "簡組長",
+            "phone": "26574874轉203"
+        },
+        {
+            "category": "學務處",
+            "title": "管理員",
+            "name": "蔡約聘管理員",
+            "phone": "26574874轉206"
+        },
+        {
+            "category": "學務處",
+            "title": "學務",
+            "name": "林約聘學務",
+            "phone": "26574874轉217"
+        },
+        {
+            "category": "學務處",
+            "title": "學務",
+            "name": "廖約聘學務",
+            "phone": "26574874轉210"
+        },
+        {
+            "category": "學務處",
+            "title": "學務",
+            "name": "林約聘學務",
+            "phone": "26574874轉 212"
+        },
+        {
+            "category": "學務處",
+            "title": "學務",
+            "name": "陳約聘學務",
+            "phone": "26574874轉 213"
+        },
+        {
+            "category": "學務處",
+            "title": "學務",
+            "name": "婁約聘學務",
+            "phone": "26574874轉211"
+        },
+        {
+            "category": "學務處",
+            "title": "學務",
+            "name": "林約聘學務",
+            "phone": "26574874轉209"
+        },
+        {
+            "category": "學務處",
+            "title": "組長",
+            "name": "鄭組長",
+            "phone": "26574874轉204"
+        },
+        {
+            "category": "學務處",
+            "title": "幹事",
+            "name": "謝幹事",
+            "phone": "26574874轉208"
+        },
+        {
+            "category": "學務處",
+            "title": "組長",
+            "name": "邱組長",
+            "phone": "26574874轉205"
+        },
+        {
+            "category": "學務處",
+            "title": "幹事",
+            "name": "蔡幹事",
+            "phone": "26574874轉186"
+        },
+        {
+            "category": "學務處",
+            "title": "專任運動教練",
+            "name": "李專任運動教練",
+            "phone": "26574874轉186"
+        },
+        {
+            "category": "學務處",
+            "title": "護理師",
+            "name": "林護理師",
+            "phone": "26574874轉151"
+        },
+        {
+            "category": "學務處",
+            "title": "護理師",
+            "name": "高護理師",
+            "phone": "26574874轉152"
         },
         {
             "category": "總務處",
             "title": "主任",
-            "name": "陳",
+            "name": "陳主任",
             "phone": "26574874轉121"
         },
         {
-            "category": "事務組",
+            "category": "總務處",
             "title": "組長",
-            "name": "馮",
+            "name": "馮組長",
             "phone": "26574874轉122"
         },
         {
-            "category": "事務組",
-            "title": "約僱幹事",
-            "name": "施",
+            "category": "總務處",
+            "title": "幹事",
+            "name": "施約僱幹事",
             "phone": "26574874轉126"
         },
         {
-            "category": "事務組",
-            "title": "技 工",
+            "category": "總務處",
+            "title": "工",
             "name": "蕭先生",
             "phone": "26574874轉326"
         },
         {
-            "category": "事務組",
-            "title": "技 工",
+            "category": "總務處",
+            "title": "工",
             "name": "張小姐",
             "phone": "26574874轉319"
         },
         {
-            "category": "文書組",
+            "category": "總務處",
             "title": "組長",
-            "name": "李",
+            "name": "李組長",
             "phone": "26574874轉124"
         },
         {
-            "category": "文書組",
-            "title": "約僱書記",
-            "name": "吳",
+            "category": "總務處",
+            "title": "書記",
+            "name": "吳約僱書記",
             "phone": "26574874轉129"
         },
         {
-            "category": "出納組",
+            "category": "總務處",
             "title": "組長",
-            "name": "吳",
+            "name": "吳組長",
             "phone": "26574874轉123"
         },
         {
-            "category": "出納組",
+            "category": "總務處",
             "title": "幹事",
-            "name": "簡",
+            "name": "簡幹事",
             "phone": "26574874轉128"
         },
         {
-            "category": "經營組",
+            "category": "總務處",
             "title": "組長",
-            "name": "朱",
+            "name": "朱組長",
             "phone": "26574874轉125"
         },
         {
-            "category": "經營組",
+            "category": "總務處",
             "title": "管理員",
-            "name": "張",
+            "name": "張管理員",
             "phone": "26574874轉127"
         },
         {
-            "category": "經營組",
+            "category": "總務處",
             "title": "技士",
-            "name": "傅",
+            "name": "傅技士",
             "phone": "26574874轉130"
         },
         {
             "category": "輔導室",
             "title": "主任",
-            "name": "芮",
+            "name": "芮主任",
             "phone": "26574874轉401"
         },
         {
             "category": "輔導室",
             "title": "管理員",
-            "name": "林",
+            "name": "林管理員",
             "phone": "26574874轉405"
         },
         {
             "category": "輔導室",
-            "title": "約聘專任",
-            "name": "葉",
+            "title": "專任",
+            "name": "葉約聘專任",
             "phone": "26574874轉406"
         },
         {
             "category": "圖書館",
             "title": "主任",
-            "name": "劉",
+            "name": "劉主任",
             "phone": "26574874轉271"
         },
         {
             "category": "圖書館",
-            "title": "圖書資源",
-            "name": "周",
+            "title": "指導老師",
+            "name": "周圖書資源",
             "phone": "26574874轉273"
         },
         {
             "category": "圖書館",
             "title": "組長",
-            "name": "謝",
+            "name": "謝組長",
             "phone": "26574874轉314"
         },
         {
             "category": "圖書館",
             "title": "幹事",
-            "name": "黃",
+            "name": "黃幹事",
             "phone": "26574874轉272"
         },
         {
             "category": "圖書館",
-            "title": "約僱技士",
-            "name": "徐",
+            "title": "技士",
+            "name": "徐約僱技士",
             "phone": "26574874轉325"
         },
         {
             "category": "實習處",
             "title": "主任",
-            "name": "羅",
+            "name": "羅主任",
             "phone": "26574874轉321"
         },
         {
-            "category": "實習組",
+            "category": "實習處",
             "title": "組長",
-            "name": "郭",
+            "name": "郭組長",
             "phone": "26574874轉322"
         },
         {
-            "category": "實習組",
+            "category": "實習處",
             "title": "技士",
             "name": "(待補)",
             "phone": "26574874轉324"
         },
         {
-            "category": "實習組",
+            "category": "實習處",
             "title": "技士",
-            "name": "陳",
+            "name": "陳技士",
             "phone": "26574874轉326"
         },
         {
-            "category": "就業輔導組",
+            "category": "實習處",
             "title": "組長",
-            "name": "陳",
+            "name": "陳組長",
             "phone": "26574874轉323"
         },
         {
-            "category": "就業輔導組",
+            "category": "實習處",
             "title": "技佐",
-            "name": "吳",
+            "name": "吳技佐",
             "phone": "26574874轉320"
         },
         {
-            "category": "就業輔導組",
-            "title": "約僱技佐",
-            "name": "張",
+            "category": "實習處",
+            "title": "技佐",
+            "name": "張約僱技佐",
             "phone": "26574874轉327"
         },
         {
             "category": "電子科",
             "title": "主任",
-            "name": "葉",
+            "name": "葉主任",
             "phone": "26574874轉361"
         },
         {
             "category": "電子科",
             "title": "技士",
-            "name": "陳",
+            "name": "陳技士",
             "phone": "26574874轉363"
         },
         {
             "category": "電機科",
             "title": "主任",
-            "name": "林",
+            "name": "林主任",
             "phone": "26574874轉261"
         },
         {
             "category": "電機科",
             "title": "技佐",
-            "name": "曾",
+            "name": "曾技佐",
             "phone": "26574874轉264"
         },
         {
             "category": "冷凍科",
             "title": "主任",
-            "name": "趙",
+            "name": "趙主任",
             "phone": "26574874轉161"
         },
         {
             "category": "冷凍科",
             "title": "技士",
-            "name": "戴",
+            "name": "戴技士",
             "phone": "26574874轉162"
         },
         {
             "category": "控制科",
             "title": "主任",
-            "name": "林",
+            "name": "林主任",
             "phone": "26574874轉461"
         },
         {
             "category": "控制科",
             "title": "技佐",
-            "name": "許",
+            "name": "許技佐",
             "phone": "null"
+        },
+        {
+            "category": "教官室",
+            "title": "教官",
+            "name": "郭教官",
+            "phone": "26574874轉219"
+        },
+        {
+            "category": "教官室",
+            "title": "教官",
+            "name": "逄教官",
+            "phone": "26574874轉218"
         },
         {
             "category": "人事室",
             "title": "主任",
-            "name": "王",
+            "name": "王主任",
             "phone": "26574874轉131"
         },
         {
             "category": "人事室",
-            "title": "約僱組員",
-            "name": "吳",
+            "title": "組員",
+            "name": "吳約僱組員",
             "phone": "26574874轉132"
         },
         {
             "category": "人事室",
             "title": "助理員",
-            "name": "鍾",
+            "name": "鍾助理員",
             "phone": "26574874轉133"
         },
         {
             "category": "會計室",
             "title": "主任",
-            "name": "歐陽",
+            "name": "歐陽主任",
             "phone": "26574874轉141"
         },
         {
             "category": "會計室",
             "title": "組員",
-            "name": "李",
+            "name": "李組員",
             "phone": "26574874轉142"
         },
         {
             "category": "會計室",
             "title": "佐理員",
-            "name": "陳",
+            "name": "陳佐理員",
             "phone": "26574874轉143"
         }
     ]
