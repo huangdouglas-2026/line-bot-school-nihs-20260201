@@ -85,8 +85,8 @@
         },
         {
             "category": "學務處",
-            "title": "訓育組",
-            "name": "卓組長",
+            "title": "卓組長",
+            "name": null,
             "phone": "26574874轉202"
         },
         {
@@ -97,8 +97,8 @@
         },
         {
             "category": "學務處",
-            "title": "學生輔導組",
-            "name": "簡組長",
+            "title": "簡組長",
+            "name": null,
             "phone": "26574874轉203"
         },
         {
@@ -145,8 +145,8 @@
         },
         {
             "category": "學務處",
-            "title": "衛生保健組",
-            "name": "鄭組長",
+            "title": "鄭組長",
+            "name": null,
             "phone": "26574874轉204"
         },
         {
@@ -157,8 +157,8 @@
         },
         {
             "category": "學務處",
-            "title": "體育活動組",
-            "name": "邱組長",
+            "title": "邱組長",
+            "name": null,
             "phone": "26574874轉205"
         },
         {
@@ -193,8 +193,8 @@
         },
         {
             "category": "總務處",
-            "title": "事務組",
-            "name": "傅技士代理組長",
+            "title": "傅技士代理組長",
+            "name": null,
             "phone": "26574874轉122"
         },
         {
@@ -217,8 +217,8 @@
         },
         {
             "category": "總務處",
-            "title": "文書組",
-            "name": "李組長",
+            "title": "李組長",
+            "name": null,
             "phone": "26574874轉124"
         },
         {
@@ -229,8 +229,8 @@
         },
         {
             "category": "總務處",
-            "title": "出納組",
-            "name": "吳組長",
+            "title": "吳組長",
+            "name": null,
             "phone": "26574874轉123"
         },
         {
@@ -241,8 +241,8 @@
         },
         {
             "category": "總務處",
-            "title": "經營組",
-            "name": "朱組長",
+            "title": "朱組長",
+            "name": null,
             "phone": "26574874轉125"
         },
         {
@@ -289,8 +289,8 @@
         },
         {
             "category": "圖書館",
-            "title": "資訊組",
-            "name": "謝組長",
+            "title": "謝組長",
+            "name": null,
             "phone": "26574874轉314"
         },
         {
@@ -313,14 +313,14 @@
         },
         {
             "category": "實習處",
-            "title": "實習組",
-            "name": "郭組長",
+            "title": "郭組長",
+            "name": null,
             "phone": "26574874轉322"
         },
         {
             "category": "實習處",
-            "title": "技士",
-            "name": "(待補)",
+            "title": "技士\n(待補)",
+            "name": null,
             "phone": "26574874轉324"
         },
         {
@@ -331,8 +331,8 @@
         },
         {
             "category": "實習處",
-            "title": "就業輔導組",
-            "name": "陳組長",
+            "title": "陳組長",
+            "name": null,
             "phone": "26574874轉323"
         },
         {
@@ -349,8 +349,8 @@
         },
         {
             "category": "實習處",
-            "title": "電子科",
-            "name": "葉主任",
+            "title": "葉主任",
+            "name": null,
             "phone": "26574874轉361"
         },
         {
@@ -361,8 +361,8 @@
         },
         {
             "category": "實習處",
-            "title": "電機科",
-            "name": "林主任",
+            "title": "林主任",
+            "name": null,
             "phone": "26574874轉261"
         },
         {
@@ -373,8 +373,8 @@
         },
         {
             "category": "實習處",
-            "title": "冷凍科",
-            "name": "趙主任",
+            "title": "趙主任",
+            "name": null,
             "phone": "26574874轉161"
         },
         {
@@ -385,15 +385,15 @@
         },
         {
             "category": "實習處",
-            "title": "控制科",
-            "name": "林主任",
+            "title": "林主任",
+            "name": null,
             "phone": "26574874轉461"
         },
         {
             "category": "實習處",
             "title": "許技佐",
             "name": null,
-            "phone": "26574874轉461"
+            "phone": "null"
         },
         {
             "category": "教官室",
@@ -451,8 +451,8 @@
         },
         {
             "category": "教務處",
-            "title": "教學組",
-            "name": "賴組長",
+            "title": "賴組長",
+            "name": null,
             "phone": "26574874轉312"
         },
         {
@@ -463,8 +463,8 @@
         },
         {
             "category": "教務處",
-            "title": "註冊組",
-            "name": "溫組長",
+            "title": "溫組長",
+            "name": null,
             "phone": "26574874轉313"
         },
         {
@@ -481,8 +481,8 @@
         },
         {
             "category": "教務處",
-            "title": "設備組",
-            "name": "江組長",
+            "title": "江組長",
+            "name": null,
             "phone": "26574874轉315"
         },
         {
@@ -493,8 +493,8 @@
         },
         {
             "category": "教務處",
-            "title": "實驗研究組",
-            "name": "張組長",
+            "title": "張組長",
+            "name": null,
             "phone": "26574874轉335"
         },
         {
@@ -505,8 +505,8 @@
         },
         {
             "category": "教務處",
-            "title": "特殊教育組",
-            "name": "鄭組長",
+            "title": "鄭組長",
+            "name": null,
             "phone": "26574874轉114"
         },
         {
